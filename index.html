@@ -806,7 +806,7 @@ input[type=number]{-moz-appearance:textfield}
       </select>
       <button class="upload-btn" onclick="openUploadModal()">⬆ Upload SIAP</button>
       <button class="report-btn" onclick="openReportModal()">📄 Report</button>
-      <div class="sync-dot"><i></i> SYNCED</div>
+      <div class="sync-dot"><i style="background:var(--ink3);box-shadow:none"></i> MEMUAT…</div>
     </div>
   </div>
 </div>
@@ -3002,7 +3002,7 @@ async function submitSIAP(){
 
 /* ==================== SINKRONISASI GOOGLE SHEETS (Fase 2) ==================== */
 async function syncLoad(){
-  if(!CONFIG.USE_LIVE || !CONFIG.SYNC_URL || CONFIG.SYNC_URL.includes('PASTE_URL')) return false;
+  if(!CONFIG.USE_LIVE || !CONFIG.SYNC_URL || CONFIG.SYNC_URL.includes('PASTE_URL')){ showSyncStatus('demo'); return false; }
   try{
     showSyncStatus('loading');
     const res=await fetch(`${CONFIG.SYNC_URL}?uid=${encodeURIComponent(CONFIG.UID)}&pw=${encodeURIComponent(CONFIG.PW)}`);
@@ -3099,7 +3099,7 @@ async function uploadSIAP(dataObj, force){
 
 function showSyncStatus(state,msg){
   const el=document.querySelector('.sync-dot'); if(!el) return;
-  const map={loading:['#ffb020','SYNCING…'],synced:['#3ddc84','SYNCED'],error:['#ff5b6e','OFFLINE'],demo:['#647890','DEMO']};
+  const map={loading:['#ffb020','SYNCING…'],synced:['#3ddc84','SYNCED'],error:['#ff5b6e','OFFLINE'],demo:['#647890','BELUM TERHUBUNG']};
   const [c,l]=map[state]||map.demo;
   el.innerHTML=`<i style="background:${c};box-shadow:0 0 8px ${c}"></i> ${l}`;
   if(state==='error'&&msg) el.title=msg;
