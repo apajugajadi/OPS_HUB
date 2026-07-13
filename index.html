@@ -31,7 +31,7 @@ body{min-height:100vh}
 
 /* ===== TOP BAR ===== */
 .topbar{position:sticky;top:0;z-index:50;background:rgba(13,17,23,.86);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
-.topbar-inner{max-width:1320px;margin:0 auto;padding:13px 22px;display:flex;align-items:center;gap:18px}
+.topbar-inner{margin:0 auto;padding:13px 32px;display:flex;align-items:center;gap:18px}
 .brand{display:flex;align-items:center;gap:11px;flex-shrink:0}
 .logo{width:34px;height:34px;border-radius:9px;background:var(--grad);display:grid;place-items:center;font-family:var(--disp);font-weight:900;color:#0d1117;font-size:18px;letter-spacing:-1px}
 .brand-txt b{font-family:var(--disp);font-weight:800;font-size:14px;letter-spacing:-.3px;display:block;line-height:1.05}
@@ -48,7 +48,7 @@ body{min-height:100vh}
 
 /* ===== TABS ===== */
 .tabnav{position:sticky;top:61px;z-index:40;background:rgba(13,17,23,.86);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
-.tabnav-scrollwrap{max-width:1320px;margin:0 auto;padding:0 22px;position:relative;display:flex;align-items:center}
+.tabnav-scrollwrap{margin:0 auto;padding:0 32px;position:relative;display:flex;align-items:center}
 .tabnav-inner{display:flex;gap:2px;overflow-x:auto;scroll-behavior:smooth;scrollbar-width:none;flex:1}
 .tabnav-inner::-webkit-scrollbar{display:none}
 .tab{background:none;border:none;border-bottom:2px solid transparent;color:var(--ink3);font-family:var(--disp);font-weight:600;font-size:13px;padding:13px 16px;cursor:pointer;white-space:nowrap;transition:.15s;display:flex;align-items:center;gap:7px;flex-shrink:0}
@@ -58,8 +58,8 @@ body{min-height:100vh}
 .tab .soon{font-family:var(--mono);font-size:8.5px;background:var(--line);color:var(--ink3);padding:2px 5px;border-radius:4px;text-transform:uppercase;letter-spacing:.5px}
 
 .tabnav-fade{position:absolute;top:0;bottom:0;width:34px;pointer-events:none;z-index:2;opacity:0;transition:opacity .2s}
-.tabnav-fade.left{left:22px;background:linear-gradient(90deg,rgba(13,17,23,.95),transparent)}
-.tabnav-fade.right{right:22px;background:linear-gradient(270deg,rgba(13,17,23,.95),transparent)}
+.tabnav-fade.left{left:32px;background:linear-gradient(90deg,rgba(13,17,23,.95),transparent)}
+.tabnav-fade.right{right:32px;background:linear-gradient(270deg,rgba(13,17,23,.95),transparent)}
 .tabnav-fade.show{opacity:1}
 .tabnav-scrollbtn{width:24px;height:24px;border-radius:50%;background:var(--panel2);border:1px solid var(--line2);color:var(--ink2);
   display:grid;place-items:center;cursor:pointer;font-size:12px;flex-shrink:0;opacity:0;pointer-events:none;transition:opacity .2s;position:relative;z-index:3}
@@ -69,7 +69,7 @@ body{min-height:100vh}
 .tabnav-scrollbtn.right{margin-left:4px}
 
 /* ===== LAYOUT ===== */
-.wrap{max-width:1320px;margin:0 auto;padding:24px 22px 80px}
+.wrap{margin:0 auto;padding:24px 32px 80px}
 .module{display:none}
 .module.on{display:block;animation:fade .4s}
 @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
@@ -201,10 +201,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:17px;heigh
 }
 /* period controls */
 .period-bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:4px;padding:13px 16px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r)}
-.period-mode{display:flex;background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:3px;gap:2px}
-.pm{background:none;border:none;color:var(--ink2);font-family:var(--mono);font-size:11px;font-weight:500;padding:6px 13px;border-radius:6px;cursor:pointer;transition:.15s}
+.period-mode{position:relative;display:flex;background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:3px;gap:2px}
+.pm-pill{position:absolute;top:3px;left:3px;height:calc(100% - 6px);width:calc(50% - 3px);background:var(--grad);border-radius:6px;transition:transform .22s cubic-bezier(.3,.9,.4,1);z-index:1}
+.period-mode.mode-range .pm-pill{transform:translateX(100%)}
+.pm{position:relative;z-index:2;background:none;border:none;color:var(--ink2);font-family:var(--mono);font-size:11px;font-weight:500;padding:6px 13px;border-radius:6px;cursor:pointer;transition:color .18s;flex:1}
 .pm:hover{color:var(--ink)}
-.pm.on{background:var(--grad);color:#0d1117;font-weight:600}
+.pm.on{color:#0d1117;font-weight:600}
 .period-chips{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
 .pchip{background:var(--panel2);border:1px solid var(--line);color:var(--ink2);font-family:var(--mono);font-size:11.5px;padding:6px 13px;border-radius:7px;cursor:pointer;transition:.15s}
 .pchip:hover{border-color:var(--line2);color:var(--ink)}
@@ -339,6 +341,22 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:17px;heigh
 /* sub cards */
 #subCardsRow{margin-bottom:6px}
 .subcards-wrap{background:var(--bg2);border:1px solid var(--line);border-radius:var(--r);padding:15px;margin-top:4px;animation:drillIn .3s}
+
+/* Tabel sub-fungsi (menggantikan tampilan kartu untuk Production & Quality Assurance) */
+.subtable-wrap{background:var(--bg2);border:1px solid var(--line);border-radius:var(--r);padding:15px;margin-top:4px;animation:drillIn .3s;overflow-x:auto}
+.subtable{width:100%;border-collapse:collapse;font-size:12.5px}
+.subtable thead th{text-align:left;padding:8px 10px;color:var(--ink3);font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--line2);white-space:nowrap}
+.subtable thead th.r{text-align:right}
+.subtable tbody td{padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+.subtable tbody td.r{text-align:right;font-variant-numeric:tabular-nums}
+.subtable tbody tr{cursor:pointer;transition:background .12s}
+.subtable tbody tr:hover td{background:rgba(255,255,255,.03)}
+.subtable tbody tr.xf-on td{background:rgba(255,176,32,.08)}
+.subtable tbody tr.xf-on td:first-child{border-left:3px solid var(--amber)}
+.subtable tbody tr.pe-row td{color:var(--ink2)}
+.subtable tbody tr.subtable-sep td{padding:6px 10px;color:var(--ink3);font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.4px;background:transparent;border-bottom:none;cursor:default}
+.subtable tbody tr.subtable-sep:hover td{background:transparent}
+.pe-tag{font-family:var(--mono);font-size:8.5px;color:var(--ink3);background:var(--panel2);padding:2px 6px;border-radius:4px;margin-left:6px}
 .subcards-lbl{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px;font-weight:600}
 .subcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:11px}
 .subcard{background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:13px;cursor:pointer;transition:.15s}
@@ -1007,7 +1025,7 @@ function renderModule(){
   if(typeof renderSyncBanner==='function') renderSyncBanner();
 }
 function placeholder(icon,title,desc,plan){
-  document.getElementById('mod').innerHTML=`<div class="placeholder"><div class="pic">${icon}</div><h2>${title}</h2><p>${desc}</p><p style="color:var(--ink3);font-size:12px">Modul ini sudah disiapkan slot-nya. Tinggal sambungkan sheet & isi renderer — tanpa bongkar struktur.</p><div class="plan">${plan.map(p=>`<div><span class="dot"></span>${p}</div>`).join('')}</div></div>`;
+  document.getElementById('mod').innerHTML=`<div class="placeholder"><div class="pic">${icon}</div><h2>${title}</h2><p>${desc}</p><p style="color:var(--ink3);font-size:12px">Modul ini sudah disiapkan tempatnya. Tinggal menyambungkan sheet dan mengisi tampilan, tanpa perlu mengubah struktur yang ada.</p><div class="plan">${plan.map(p=>`<div><span class="dot"></span>${p}</div>`).join('')}</div></div>`;
 }
 
 /* ============================================================ FILTERS */
@@ -1022,9 +1040,10 @@ function renderPeriodControls(){
   // period chips (single) + range mode
   const months=DB.months||[1,2,3,4,5];
   return `<div class="period-bar">
-    <div class="period-mode">
-      <button id="pmSingle" class="pm on" onclick="setPeriodMode('single')">Per Bulan</button>
-      <button id="pmRange" class="pm" onclick="setPeriodMode('range')">Rentang</button>
+    <div class="period-mode ${PERIOD_MODE==='range'?'mode-range':''}" id="periodModeWrap">
+      <div class="pm-pill" id="pmPill"></div>
+      <button id="pmSingle" class="pm ${PERIOD_MODE==='single'?'on':''}" onclick="setPeriodMode('single')">Per Bulan</button>
+      <button id="pmRange" class="pm ${PERIOD_MODE==='range'?'on':''}" onclick="setPeriodMode('range')">Rentang</button>
     </div>
     <div id="periodChips" class="period-chips"></div>
   </div>`;
@@ -1034,6 +1053,7 @@ function setPeriodMode(mode){
   PERIOD_MODE=mode;
   document.getElementById('pmSingle').classList.toggle('on',mode==='single');
   document.getElementById('pmRange').classList.toggle('on',mode==='range');
+  const wrap=document.getElementById('periodModeWrap'); if(wrap) wrap.classList.toggle('mode-range',mode==='range');
   if(mode==='single'){ STATE.mFrom=STATE.mTo; } // collapse to single
   drawPeriodChips(); STATE.drill=null; renderModule();
 }
@@ -1377,7 +1397,7 @@ function renderBreadcrumb(){
   if(STATE.xf.mesin!=null) chips.push(`<span class="bc-chip me" onclick="clearXF('mesin')">${DB.mesin[STATE.xf.mesin]} <i>✕</i></span>`);
   if(STATE.xf.kat!=null) chips.push(`<span class="bc-chip ka" onclick="clearXF('kat')">${DB.kat[STATE.xf.kat]} <i>✕</i></span>`);
   if(STATE.xf.sub!=null) chips.push(`<span class="bc-chip su" onclick="clearXF('sub')">${DB.sub[STATE.xf.sub]} <i>✕</i></span>`);
-  return `<div class="breadcrumb"><span class="bc-lbl">▼ Nyaring:</span>${chips.join('')}<button class="bc-reset" onclick="clearXF()">Reset semua</button></div>`;
+  return `<div class="breadcrumb"><span class="bc-lbl">▼ Filter Aktif:</span>${chips.join('')}<button class="bc-reset" onclick="clearXF()">Reset semua</button></div>`;
 }
 
 /* ---- Fungsi cards ---- */
@@ -1485,64 +1505,98 @@ function renderSubCards(A){
   const meta=DB.fungsi_meta[fn]||{color:'#647890'};
 
   if(fn==='Production'){
-    host.innerHTML=renderProductionSubs(A,sd,totOp,meta); return;
+    host.innerHTML=renderProductionSubsTable(A,sd,totOp,meta); return;
   }
-  // Generic (Quality etc): subs sejajar, klik = cross-filter
+  // Generic (Quality dan lainnya): tabel, klik baris = cross-filter
   const subs=(DB.sub_struct[fn]||[]).filter(s=>s!=='Start-End Produksi');
-  const cards=subs.map(sName=>subCardGeneric(sName,sd,totOp)).join('');
-  host.innerHTML=`<div class="subcards-wrap"><div class="subcards-lbl" style="color:${meta.color}">▾ Sub-fungsi ${fn} <span class="sc-hint">klik kartu untuk filter · sebaran per PU muncul di donut</span></div><div class="subcards">${cards}</div></div>`;
+  host.innerHTML=renderGenericSubsTable(fn,subs,sd,totOp,meta);
 }
-function subCardGeneric(sName,sd,totOp){
-  const sIdx=DB.sub.indexOf(sName);
-  const v=sd[sIdx]||{raw:0,net:0,n:0};
-  const dtr=v.net/totOp*100;
-  const tgt=DB.targets_sub&&DB.targets_sub[sName]!=null?DB.targets_sub[sName]*100:null;
-  const active=STATE.xf.sub===sIdx;
-  const cut=v.raw-v.net;
-  const st=statusBadge(dtr,tgt);
-  return `<div class="subcard ${active?'xf-on':''}" onclick="toggleXF('sub',${sIdx})">
-    <div class="subcard-h"><span class="subcard-name">${sName}</span>${cut>0?`<span class="subcard-tol">−${fmt.n(cut)} tol</span>`:''}</div>
-    <div class="subcard-v">${dtr.toFixed(2)}<small>% DT</small></div>
-    ${st.html?`<div class="subcard-status">${st.html}</div>`:''}
-    <div class="subcard-foot">${fmt.n(v.net)} jam net · ${v.n} event</div>
+/* Tabel generik untuk sub-fungsi (dipakai Quality Assurance dan fungsi lain yang punya >1 sub biasa) */
+function renderGenericSubsTable(fn,subs,sd,totOp,meta){
+  const rows=subs.map(sName=>{
+    const sIdx=DB.sub.indexOf(sName);
+    const v=sd[sIdx]||{raw:0,net:0,n:0};
+    const dtr=v.net/totOp*100;
+    const tgt=DB.targets_sub&&DB.targets_sub[sName]!=null?DB.targets_sub[sName]*100:null;
+    const active=STATE.xf.sub===sIdx;
+    const cut=v.raw-v.net;
+    const st=statusBadge(dtr,tgt);
+    return `<tr class="${active?'xf-on':''}" onclick="toggleXF('sub',${sIdx})">
+      <td>${sName}</td>
+      <td class="r">${dtr.toFixed(2)}%</td>
+      <td class="r">${fmt.n(v.net)}</td>
+      <td class="r">${v.n}</td>
+      <td class="r">${cut>0?'−'+fmt.n(cut):'–'}</td>
+      <td>${st.html||'–'}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="subtable-wrap">
+    <div class="subcards-lbl" style="color:${meta.color}">▾ Sub-fungsi ${fn} <span class="sc-hint">klik baris untuk filter · sebaran per PU muncul di donut</span></div>
+    <table class="subtable">
+      <thead><tr><th>Sub-fungsi</th><th class="r">DT Ratio</th><th class="r">Net (jam)</th><th class="r">Event</th><th class="r">Toleransi</th><th>Status</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
   </div>`;
 }
-function renderProductionSubs(A,sd,totOp,meta){
-  // 3 PU cards (Process Eng per PU) + RMP (counted) + Process Eng summary (separated, not counted)
+/* Tabel khusus Production: baris PUJ/PUC/PUG (Process Eng per PU) + RMP (ikut total) + Process Eng ringkasan (tidak ikut total) */
+function renderProductionSubsTable(A,sd,totOp,meta){
   const pePU=aggProductionPU();
   const puNames=['Production Unit Jakarta','Production Unit Cilacap','Production Unit Gresik'];
   const puTgts=[DB.targets_pu.PUJ,DB.targets_pu.PUC,DB.targets_pu.PUG].map(x=>x*100);
   const peIdx=DB.sub.indexOf('Process Eng');
-  let puCards=[0,1,2].map(i=>{
+
+  const puRows=[0,1,2].map(i=>{
     const v=pePU[i]; const dtr=v.net/totOp*100; const tgt=puTgts[i];
     const st=statusBadge(dtr,tgt); const cut=v.raw-v.net;
-    return `<div class="subcard pu-card" onclick="togglePU('${PU_NAME[i]}')">
-      <div class="subcard-h"><span class="subcard-name">${puNames[i]}</span><span class="tag ${PU_TAG[i]}">${PU_NAME[i]}</span></div>
-      <div class="subcard-v">${dtr.toFixed(2)}<small>% DT</small></div>
-      <div class="subcard-status">${st.html}</div>
-      <div class="subcard-foot">${fmt.n(v.net)} jam net · ${v.n} event${cut>0?` · −${fmt.n(cut)} tol`:''}</div>
-    </div>`;
+    return `<tr onclick="togglePU('${PU_NAME[i]}')">
+      <td>${puNames[i]} <span class="tag ${PU_TAG[i]}">${PU_NAME[i]}</span></td>
+      <td class="r">${dtr.toFixed(2)}%</td>
+      <td class="r">${fmt.n(v.net)}</td>
+      <td class="r">${v.n}</td>
+      <td class="r">${cut>0?'−'+fmt.n(cut):'–'}</td>
+      <td>${st.html||'–'}</td>
+    </tr>`;
   }).join('');
-  // RMP card (counted)
-  const rmp=subCardGeneric('Production RMP',sd,totOp);
-  // Process Eng summary card (separated, NOT counted)
+
+  // RMP (ikut total)
+  const rmpIdx=DB.sub.indexOf('Production RMP');
+  const rmpV=sd[rmpIdx]||{raw:0,net:0,n:0};
+  const rmpDtr=rmpV.net/totOp*100;
+  const rmpTgt=DB.targets_sub&&DB.targets_sub['Production RMP']!=null?DB.targets_sub['Production RMP']*100:null;
+  const rmpSt=statusBadge(rmpDtr,rmpTgt);
+  const rmpActive=STATE.xf.sub===rmpIdx;
+  const rmpCut=rmpV.raw-rmpV.net;
+  const rmpRow=`<tr class="${rmpActive?'xf-on':''}" onclick="toggleXF('sub',${rmpIdx})">
+    <td>Production RMP</td>
+    <td class="r">${rmpDtr.toFixed(2)}%</td>
+    <td class="r">${fmt.n(rmpV.net)}</td>
+    <td class="r">${rmpV.n}</td>
+    <td class="r">${rmpCut>0?'−'+fmt.n(rmpCut):'–'}</td>
+    <td>${rmpSt.html||'–'}</td>
+  </tr>`;
+
+  // Process Eng (ringkasan, TIDAK ikut total -- ditandai jelas beda baris/section)
   const peV=sd[peIdx]||{raw:0,net:0,n:0};
   const peDtr=peV.net/totOp*100;
   const peTgt=DB.targets_sub['Process Eng']*100;
   const peSt=statusBadge(peDtr,peTgt);
   const peActive=STATE.xf.sub===peIdx;
   const peCut=peV.raw-peV.net;
-  const peCard=`<div class="subcard pe-card ${peActive?'xf-on':''}" onclick="toggleXF('sub',${peIdx})">
-    <div class="subcard-h"><span class="subcard-name">Process Eng</span><span class="pe-tag">RINGKASAN PU</span></div>
-    <div class="subcard-v">${peDtr.toFixed(2)}<small>% DT</small></div>
-    <div class="subcard-status">${peSt.html}</div>
-    <div class="subcard-foot">${fmt.n(peV.net)} jam net · = jumlah 3 PU · tidak ikut total</div>
-  </div>`;
-  return `<div class="subcards-wrap">
+  const peRow=`<tr class="pe-row ${peActive?'xf-on':''}" onclick="toggleXF('sub',${peIdx})">
+    <td>Process Eng <span class="pe-tag">RINGKASAN PU, TIDAK IKUT TOTAL</span></td>
+    <td class="r">${peDtr.toFixed(2)}%</td>
+    <td class="r">${fmt.n(peV.net)}</td>
+    <td class="r">${peV.n}</td>
+    <td class="r">${peCut>0?'−'+fmt.n(peCut):'–'}</td>
+    <td>${peSt.html||'–'}</td>
+  </tr>`;
+
+  return `<div class="subtable-wrap">
     <div class="subcards-lbl" style="color:${meta.color}">▾ Sub-fungsi Production <span class="sc-hint">PU & RMP dijumlah ke total · Process Eng hanya ringkasan</span></div>
-    <div class="subcards">${puCards}${rmp}</div>
-    <div class="pe-divider"><span>ringkasan (tidak dijumlah)</span></div>
-    <div class="subcards"><div class="pe-wrap">${peCard}</div></div>
+    <table class="subtable">
+      <thead><tr><th>Sub-fungsi</th><th class="r">DT Ratio</th><th class="r">Net (jam)</th><th class="r">Event</th><th class="r">Toleransi</th><th>Status</th></tr></thead>
+      <tbody>${puRows}${rmpRow}<tr class="subtable-sep"><td colspan="6">Ringkasan (tidak dijumlah ke total)</td></tr>${peRow}</tbody>
+    </table>
   </div>`;
 }
 
@@ -2010,7 +2064,7 @@ function renderActionTracking(el){
   arr.forEach(r=>{ const k=actionKey(r.pu,r.mi,r.ki); const a=STATE.actions[k]; const s=a?a.status:'open'; stats[s]++; });
 
   el.innerHTML=`
-    <div class="an-intro">Loop tindak lanjut: tiap repeat offender dikasih <b>status</b>, <b>catatan tindakan</b>, dan <b>PIC</b>. Biar downtime nggak cuma kecatat tapi ada follow-up sampai closed.</div>
+    <div class="an-intro">Loop tindak lanjut: setiap kejadian berulang diberikan <b>status</b>, <b>catatan tindakan</b>, dan <b>PIC</b>, agar downtime tidak hanya tercatat tetapi memiliki tindak lanjut sampai selesai.</div>
     <div class="act-stats">
       <div class="act-stat open"><span class="act-n">${stats.open}</span><span class="act-l">Open</span></div>
       <div class="act-stat progress"><span class="act-n">${stats.progress}</span><span class="act-l">In Progress</span></div>
@@ -2576,7 +2630,7 @@ function renderOeeTren(el){
   // build points only for available
   const oeePts=series.filter(s=>s.OEE!=null).map(s=>`${xs(s.m-1)},${ys(s.OEE)}`).join(' ');
   el.innerHTML=`
-    <div class="an-intro">⚠ <b>Wadah tren siap, data baru 1 bulan (Januari 2026).</b> Engine OEE saat ini cuma berisi Januari — tren & YTD penuh terisi otomatis saat admin tarik SIAP Feb–Des (sama seperti modul Downtime yang sudah Jan–Mei). Garis di bawah menampilkan titik Januari sebagai baseline.</div>
+    <div class="an-intro">⚠ <b>Wadah tren sudah siap, data baru tersedia 1 bulan (Januari 2026).</b> Mesin hitung OEE saat ini hanya berisi data Januari — tren dan YTD akan terisi otomatis secara penuh setelah admin menarik data SIAP Februari sampai Desember (sama seperti modul Downtime yang sudah mencakup Januari–Mei). Garis di bawah menampilkan titik Januari sebagai baseline.</div>
     <div class="grid g2">
       <div class="panel"><div class="panel-h"><h3>Tren OEE Bulanan ${STATE.oeePU!=='ALL'?'· '+STATE.oeePU:''}</h3><span class="hint">Jan–Des 2026</span></div>
         <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">
@@ -2717,7 +2771,7 @@ function renderDefectBOM(){
   let cum=0;
   return `
     <div class="sec-label" style="margin-top:20px">Reject Material Pembungkus (BOM Filling) <span class="click-hint">cap · label · segel · botol · karton</span></div>
-    <div class="an-intro">Dari BOM filling (sheet Pemakaian): reject di-trace ke <b>jenis material pembungkus</b> — bukan cuma produk apa, tapi <b>komponen apa yang terbuang</b>. Base oil/produk (${fmt.n(df.baseOil)}) dipisah karena itu bahan isi, bukan kemasan.</div>
+    <div class="an-intro">Dari BOM filling (sheet Pemakaian): reject ditelusuri berdasarkan <b>jenis material pembungkus</b> — bukan hanya produk apa, melainkan <b>komponen apa yang terbuang</b>. Base oil/produk (${fmt.n(df.baseOil)}) dipisahkan karena merupakan bahan isi, bukan kemasan.</div>
     <div class="grid g2">
       <div class="panel"><div class="panel-h"><h3>Pareto Reject per Jenis Pembungkus</h3><span class="hint">total ${fmt.n(tot)} unit</span></div>
         <div class="big6-list">${df.byJenis.map(x=>{cum+=x.rej;return `<div class="big6-item">
@@ -2738,7 +2792,7 @@ function renderOeeBridge(el){
   const dtNet=A.totDtNet, op=A.totOp, dtr=A.dtrNet;
   const oeeAll=oeeAggInc(oeeMachinesLive());
   el.innerHTML=`
-    <div class="an-intro">Dua KPI, satu sumber data. Modul <b>Downtime</b> dan <b>OEE</b> sama-sama dari event PDM, tapi <b>basis hitungnya beda</b> — makanya angkanya beda. Ini penjelasan biar nggak bingung & nggak jalan sendiri-sendiri.</div>
+    <div class="an-intro">Dua KPI, satu sumber data. Modul <b>Downtime</b> dan <b>OEE</b> sama-sama berasal dari event PDM, tetapi <b>basis perhitungannya berbeda</b> — sehingga angkanya pun berbeda. Penjelasan ini dimaksudkan agar tidak membingungkan dan agar kedua modul dipahami tidak berjalan sendiri-sendiri.</div>
     <div class="grid g2">
       <div class="panel"><div class="panel-h"><h3>📊 Modul Downtime (DT Ratio)</h3></div>
         <div class="bridge-metric"><span class="bm-k">DT Ratio (Net)</span><span class="bm-v" style="color:var(--amber)">${dtr.toFixed(2)}%</span></div>
@@ -3377,7 +3431,7 @@ function renderRekonTabSaran(scr){
   return `
     <div class="rekon-explain">
       <b>Beda dengan tab "Semua Downtime"?</b> Tab ini mengelompokkan baris serupa jadi satu keputusan
-      (misal 86 baris sekaligus), cocok untuk keputusan cepat pas meeting. Tab "Semua Downtime" untuk tinjau baris per baris.
+      (misal 86 baris sekaligus), cocok untuk keputusan cepat saat rapat. Tab "Semua Downtime" untuk tinjau baris per baris.
     </div>
 
     <div class="rekon-card">
