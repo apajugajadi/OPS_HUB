@@ -620,6 +620,24 @@ input[type=number]{-moz-appearance:textfield}
 
 /* sync notif banner */
 .sync-banner{position:fixed;bottom:20px;right:20px;z-index:200;background:var(--panel);border:1px solid var(--amber);border-radius:14px;padding:14px 18px;box-shadow:0 8px 32px rgba(0,0,0,.5);max-width:340px;animation:slideUp .3s ease}
+
+/* Notifikasi terpusat -- toast stack di pojok kanan bawah, dipakai semua operasi backend */
+.notify-stack{position:fixed;bottom:20px;right:20px;z-index:300;display:flex;flex-direction:column;gap:8px;max-width:360px}
+.notify-toast{display:flex;align-items:flex-start;gap:9px;background:var(--panel);border-radius:10px;padding:11px 14px;box-shadow:0 8px 24px rgba(0,0,0,.45);animation:slideUp .25s ease;font-size:12.5px;line-height:1.5}
+.notify-toast.notify-out{animation:slideDown .2s ease forwards}
+.notify-pending{border:1px solid var(--amber)}
+.notify-success{border:1px solid var(--green)}
+.notify-error{border:1px solid var(--red)}
+.notify-ic{flex-shrink:0;font-size:14px;line-height:1.4}
+.notify-pending .notify-ic{color:var(--amber)}
+.notify-success .notify-ic{color:var(--green)}
+.notify-error .notify-ic{color:var(--red)}
+.notify-body{flex:1;min-width:0}
+.notify-txt{color:var(--ink)}
+.notify-hint{margin-top:5px;padding-top:6px;border-top:1px dashed var(--line2);color:var(--ink2);font-size:11.5px;line-height:1.5}
+.notify-close{background:none;border:none;color:var(--ink3);cursor:pointer;font-size:11px;flex-shrink:0;padding:0 0 0 6px}
+.notify-close:hover{color:var(--ink)}
+@keyframes slideDown{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(8px)}}
 @keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
 .sync-banner-h{display:flex;align-items:center;gap:9px;margin-bottom:9px}
 .sync-banner-ic{width:24px;height:24px;border-radius:50%;background:rgba(255,176,32,.15);display:grid;place-items:center;font-size:13px}
@@ -2862,7 +2880,7 @@ function renderSyncBanner(){
     <div class="sync-banner-h"><div class="sync-banner-ic">${live?'☁️':'⚠️'}</div><div class="sync-banner-t">${total} perubahan belum tersimpan</div></div>
     <div class="sync-banner-list">${pend.map(p=>`<div class="sb-item"><span>${p.label}</span><b>${p.n}</b></div>`).join('')}</div>
     <div class="sync-banner-btns">
-      ${live?`<button class="sync-save-btn" onclick="syncAllEdits()">☁️ Simpan ke Sheets</button>`:`<button class="sync-save-btn" onclick="alert('Hubungkan Google Sheets dulu (lihat panduan). Editan aktif selama sesi ini.')">Simpan ke Sheets</button>`}
+      ${live?`<button class="sync-save-btn" onclick="syncAllEdits()">☁️ Simpan ke Sheets</button>`:`<button class="sync-save-btn" onclick="notify('error','Belum terhubung ke Google Sheets. Editan aktif selama sesi ini.',{hint:'Isi CONFIG.SYNC_URL dan CONFIG.PW dengan benar terlebih dahulu (lihat Langkah 7 pada Panduan Deploy).'})">Simpan ke Sheets</button>`}
       <button class="sync-dismiss-btn" onclick="document.getElementById('syncBanner').remove()">Nanti</button>
     </div>`;
   document.body.appendChild(div);
@@ -3003,11 +3021,17 @@ async function submitSIAP(){
 /* ==================== SINKRONISASI GOOGLE SHEETS (Fase 2) ==================== */
 async function syncLoad(){
   if(!CONFIG.USE_LIVE || !CONFIG.SYNC_URL || CONFIG.SYNC_URL.includes('PASTE_URL')){ showSyncStatus('demo'); return false; }
+  const nid=notify('pending', 'Menarik data terbaru dari Google Sheets…');
   try{
     showSyncStatus('loading');
     const res=await fetch(`${CONFIG.SYNC_URL}?uid=${encodeURIComponent(CONFIG.UID)}&pw=${encodeURIComponent(CONFIG.PW)}`);
     const j=await res.json();
-    if(!j.ok){ showSyncStatus('error',j.error); return false; }
+    if(!j.ok){
+      showSyncStatus('error',j.error);
+      updateNotify(nid,'error', `Gagal menarik data dari Google Sheets: ${j.error||'tidak diketahui'}.`,
+        'Periksa apakah UID/password di CONFIG cocok dengan CFG di Apps Script, dan Apps Script sudah di-deploy dengan "Who has access: Anyone".');
+      return false;
+    }
     const d=j.data;
     // downtime
     if(d.dt && !d._empty){ Object.assign(DB, {dt:d.dt,op:d.op,mesin:d.mesin,kat:d.kat,fungsi:d.fungsi,sub:d.sub,cls:d.cls,big6:d.big6,sebabList:d.sebabList||['OP','TR']}); }
@@ -3027,13 +3051,23 @@ async function syncLoad(){
       m.mesin.forEach(r=>{ if(String(r.Include)==='false'||r.Include===false) STATE.mesinExclude[r.PU+'|'+r.Mesin]=true; });
     }
     DB.months=[...new Set(DB.dt.map(r=>r[1]).filter(x=>x>0))].sort((a,b)=>a-b);
-    showSyncStatus('synced'); return true;
-  }catch(err){ showSyncStatus('error',String(err)); return false; }
+    showSyncStatus('synced');
+    updateNotify(nid,'success', 'Data terbaru dari Google Sheets berhasil dimuat.');
+    return true;
+  }catch(err){
+    showSyncStatus('error',String(err));
+    updateNotify(nid,'error', `Gagal menarik data: ${err}.`,
+      'Periksa koneksi internet, atau apakah CONFIG.SYNC_URL sudah diisi URL Web App yang benar (diakhiri /exec).');
+    return false;
+  }
 }
 
 /* Simpan SEMUA editan master sekaligus (dipanggil tombol "Simpan ke Sheets") */
 async function syncSaveAll(){
-  if(!CONFIG.USE_LIVE || CONFIG.SYNC_URL.includes('PASTE_URL')){ alert('Hubungkan Google Sheets dulu.'); return false; }
+  if(!CONFIG.USE_LIVE || CONFIG.SYNC_URL.includes('PASTE_URL')){
+    notify('error', 'Belum terhubung ke Google Sheets.', {hint:'Isi CONFIG.SYNC_URL dan CONFIG.PW dengan benar terlebih dahulu (lihat Langkah 7 pada Panduan Deploy).'});
+    return false;
+  }
   const sections={};
   // kapasitas (gabung base + override)
   sections.kapasitas=(OEE.kapasitas||[]).map(k=>{
@@ -3055,15 +3089,23 @@ async function syncSaveAll(){
   const tgtRows=[]; Object.keys(STATE.targets||{}).forEach(f=>tgtRows.push({Level:'fungsi',Target:f,Value:STATE.targets[f]}));
   sections.target=tgtRows;
 
+  const nid=notify('pending', 'Menyimpan perubahan Master Data ke Google Sheets…');
   try{
     showSyncStatus('loading');
     const res=await fetch(CONFIG.SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
       body:JSON.stringify({uid:CONFIG.UID,pw:CONFIG.PW,action:'save_master',sections})});
     const j=await res.json();
     showSyncStatus(j.ok?'synced':'error',j.error);
-    if(j.ok){ const b=document.getElementById('syncBanner'); if(b)b.remove(); }
+    if(j.ok){
+      const b=document.getElementById('syncBanner'); if(b)b.remove();
+      updateNotify(nid,'success', `Tersimpan: ${(j.saved||[]).join(', ')||'perubahan Master Data'}.`);
+    }else{
+      updateNotify(nid,'error', `Gagal menyimpan ke Google Sheets: ${j.error||'tidak diketahui'}.`,
+        'Periksa apakah Apps Script sudah di-deploy versi terbaru, dan UID/password di CONFIG cocok dengan CFG di Apps Script. Coba klik "Simpan ke Sheets" sekali lagi.');
+    }
     return j.ok;
-  }catch(err){ showSyncStatus('error',String(err)); return false; }
+  }catch(err){ showSyncStatus('error',String(err)); updateNotify(nid,'error', `Gagal menyimpan: ${err}.`,
+      'Periksa koneksi internet, atau apakah CONFIG.SYNC_URL sudah diisi URL Web App yang benar (diakhiri /exec).'); return false; }
 }
 /* Catatan: syncAllEdits() TIDAK didefinisikan ulang di sini -- dashboard sudah
    punya versinya sendiri (lebih lengkap, dengan status tombol & pendingEdits()).
@@ -3071,29 +3113,45 @@ async function syncSaveAll(){
 
 /* Upload data SIAP per-PU. dataObj = {pu,bulan,tahun,downtime:[],hasilProd:[],netOp:[],pemakaian:[]} */
 async function uploadSIAP(dataObj, force){
-  if(!CONFIG.USE_LIVE || CONFIG.SYNC_URL.includes('PASTE_URL')){ alert('Hubungkan Google Sheets dulu.'); return; }
-  // 1) cek dobel dulu
-  if(!force){
-    const chk=await fetch(CONFIG.SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body:JSON.stringify({uid:CONFIG.UID,pw:CONFIG.PW,action:'check_dupe',pu:dataObj.pu,bulan:dataObj.bulan,tahun:dataObj.tahun})});
-    const cj=await chk.json();
-    if(cj.dupe){
-      if(!confirm(`⚠ ${dataObj.pu} bulan ${dataObj.bulan}/${dataObj.tahun} SUDAH pernah di-upload.\n\nReplace data lama dengan yang baru?`)) return;
-      force=true;
-    }
+  if(!CONFIG.USE_LIVE || CONFIG.SYNC_URL.includes('PASTE_URL')){
+    notify('error', 'Belum terhubung ke Google Sheets.', {hint:'Isi CONFIG.SYNC_URL dan CONFIG.PW dengan benar terlebih dahulu (lihat Langkah 7 pada Panduan Deploy).'});
+    return;
   }
-  // 2) upload
-  showSyncStatus('loading');
-  const res=await fetch(CONFIG.SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
-    body:JSON.stringify(Object.assign({uid:CONFIG.UID,pw:CONFIG.PW,action:'upload_siap',force:!!force},dataObj))});
-  const j=await res.json();
-  if(j.ok){
-    showSyncStatus('synced');
-    alert(`✓ Upload ${j.pu} ${j.bulan}/${j.tahun} berhasil.\nDowntime: ${j.rows.downtime} baris\nHasil Produksi: ${j.rows.hasilProd}\nNet Op: ${j.rows.netOp}\nPemakaian: ${j.rows.pemakaian}` + (j.dupRowsRemoved?`\n\n⚠ ${j.dupRowsRemoved} baris dobel dibuang otomatis.`:'') + (j.replaced?'\n(data lama di-replace)':''));
-    await syncLoad(); renderModule();
-  }else{
-    showSyncStatus('error',j.error);
-    alert('✕ Upload gagal: '+j.error);
+  const nid=notify('pending', `Memeriksa data ${dataObj.pu} bulan ${dataObj.bulan}/${dataObj.tahun}…`);
+  try{
+    // 1) cek dobel dulu
+    if(!force){
+      const chk=await fetch(CONFIG.SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+        body:JSON.stringify({uid:CONFIG.UID,pw:CONFIG.PW,action:'check_dupe',pu:dataObj.pu,bulan:dataObj.bulan,tahun:dataObj.tahun})});
+      const cj=await chk.json();
+      if(cj.dupe){
+        if(!confirm(`⚠ ${dataObj.pu} bulan ${dataObj.bulan}/${dataObj.tahun} SUDAH pernah di-upload.\n\nReplace data lama dengan yang baru?`)){
+          dismissNotify(nid); return;
+        }
+        force=true;
+      }
+    }
+    // 2) upload
+    updateNotify(nid,'pending', `Mengunggah data ${dataObj.pu} bulan ${dataObj.bulan}/${dataObj.tahun}…`);
+    showSyncStatus('loading');
+    const res=await fetch(CONFIG.SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify(Object.assign({uid:CONFIG.UID,pw:CONFIG.PW,action:'upload_siap',force:!!force},dataObj))});
+    const j=await res.json();
+    if(j.ok){
+      showSyncStatus('synced');
+      const detail=`Downtime: ${j.rows.downtime} baris · Hasil Produksi: ${j.rows.hasilProd} · Net Op: ${j.rows.netOp} · Pemakaian: ${j.rows.pemakaian}`
+        +(j.dupRowsRemoved?` · ${j.dupRowsRemoved} baris dobel dibuang otomatis`:'')+(j.replaced?' · data lama telah di-replace':'');
+      updateNotify(nid,'success', `Upload ${j.pu} ${j.bulan}/${j.tahun} berhasil. ${detail}.`);
+      await syncLoad(); renderModule();
+    }else{
+      showSyncStatus('error',j.error);
+      updateNotify(nid,'error', `Upload gagal: ${j.error||'tidak diketahui'}.`,
+        'Periksa apakah bulan ini sudah ditandai Final (harus dibatalkan dulu di modul Rekonsiliasi), atau apakah format data yang diupload sudah sesuai.');
+    }
+  }catch(err){
+    showSyncStatus('error',String(err));
+    updateNotify(nid,'error', `Upload gagal: ${err}.`,
+      'Periksa koneksi internet, atau apakah CONFIG.SYNC_URL sudah diisi URL Web App yang benar (diakhiri /exec).');
   }
 }
 
@@ -3103,6 +3161,45 @@ function showSyncStatus(state,msg){
   const [c,l]=map[state]||map.demo;
   el.innerHTML=`<i style="background:${c};box-shadow:0 0 8px ${c}"></i> ${l}`;
   if(state==='error'&&msg) el.title=msg;
+}
+
+/* ==================== NOTIFIKASI TERPUSAT UNTUK SEMUA OPERASI BACKEND ====================
+   Dipakai di SETIAP titik yang mengirim/menarik data ke Google Sheets, supaya pengguna
+   selalu tahu persis apakah suatu aksi berhasil, gagal, atau masih berjalan -- tidak ada
+   lagi aksi yang "diam-diam tidak terjadi apa-apa" tanpa pemberitahuan.
+   SEMUA notifikasi (sukses/gagal/pending) tetap tampil sampai pengguna menutupnya sendiri
+   -- tidak ada auto-hilang, supaya tidak terlewat kalau pengguna sedang tidak melihat layar. */
+let __notifySeq=0;
+function notify(kind, text, opts){
+  opts=opts||{};
+  const id='notify-'+(++__notifySeq);
+  const wrap=document.getElementById('notifyStack')||(()=>{
+    const d=document.createElement('div'); d.id='notifyStack'; d.className='notify-stack';
+    document.body.appendChild(d); return d;
+  })();
+  const el=document.createElement('div');
+  el.className='notify-toast notify-'+kind;
+  el.id=id;
+  el.innerHTML=notifyInnerHtml_(id,kind,text,opts.hint);
+  wrap.appendChild(el);
+  return id;
+}
+function updateNotify(id, kind, text, hint){
+  const el=document.getElementById(id); if(!el) return notify(kind,text,{hint});
+  el.className='notify-toast notify-'+kind;
+  el.innerHTML=notifyInnerHtml_(id,kind,text,hint);
+  return id;
+}
+function notifyInnerHtml_(id,kind,text,hint){
+  const icons={pending:'⏳',success:'✓',error:'✕'};
+  const closeBtn=`<button class="notify-close" onclick="dismissNotify('${id}')" title="Tutup">✕</button>`;
+  const hintHtml=(kind==='error'&&hint)?`<div class="notify-hint">💡 ${hint}</div>`:'';
+  return `<span class="notify-ic">${icons[kind]||'•'}</span><div class="notify-body"><span class="notify-txt">${text}</span>${hintHtml}</div>${closeBtn}`;
+}
+function dismissNotify(id){
+  const el=document.getElementById(id); if(!el) return;
+  el.classList.add('notify-out');
+  setTimeout(()=>el.remove(), 200);
 }
 
 /* ==================== MODUL REKONSILIASI (Fase 3) ==================== */
@@ -3151,28 +3248,53 @@ async function rekonFetchAllDowntime(){
     filterLine:STATE.rekonFilterLine, filterKategori:STATE.rekonFilterKategori, filterSebab:STATE.rekonFilterSebab,
     cari:STATE.rekonCari, hanyaFlag:STATE.rekonHanyaFlag, page:STATE.rekonPage, pageSize:STATE.rekonPageSize
   });
-  const res = await fetch(`${CONFIG.SYNC_URL}?${p.toString()}`);
-  const j = await res.json();
-  if(j.ok){ STATE.rekonCache = j; }
-  return j;
+  try{
+    const res = await fetch(`${CONFIG.SYNC_URL}?${p.toString()}`);
+    const j = await res.json();
+    if(j.ok){ STATE.rekonCache = j; }
+    else{ notify('error', `Gagal memuat data downtime: ${j.error||'tidak diketahui'}.`,
+      {hint:'Periksa koneksi ke Google Sheets, atau coba pilih ulang PU/Bulan/Tahun.'}); }
+    return j;
+  }catch(err){
+    notify('error', `Gagal memuat data downtime: ${err}.`,
+      {hint:'Periksa koneksi internet, atau apakah CONFIG.SYNC_URL sudah benar.'});
+    return {ok:false, error:String(err)};
+  }
 }
-
 async function rekonFetchScreening(){
   const p = new URLSearchParams({ uid:CONFIG.UID, pw:CONFIG.PW, action:'get_screening',
     pu:STATE.rekonPU, bulan:STATE.rekonBulan, tahun:STATE.rekonTahun });
-  const res = await fetch(`${CONFIG.SYNC_URL}?${p.toString()}`);
-  const j = await res.json();
-  if(j.ok){ STATE.rekonScreeningCache = j; }
-  return j;
+  try{
+    const res = await fetch(`${CONFIG.SYNC_URL}?${p.toString()}`);
+    const j = await res.json();
+    if(j.ok){ STATE.rekonScreeningCache = j; }
+    else{ notify('error', `Gagal memuat saran screening: ${j.error||'tidak diketahui'}.`,
+      {hint:'Periksa koneksi ke Google Sheets, atau coba pilih ulang PU/Bulan/Tahun.'}); }
+    return j;
+  }catch(err){
+    notify('error', `Gagal memuat saran screening: ${err}.`,
+      {hint:'Periksa koneksi internet, atau apakah CONFIG.SYNC_URL sudah benar.'});
+    return {ok:false, error:String(err)};
+  }
 }
 
 async function rekonFetchStatus(){
   const p = new URLSearchParams({ uid:CONFIG.UID, pw:CONFIG.PW, action:'get_upload_status',
     pu:STATE.rekonPU, bulan:STATE.rekonBulan, tahun:STATE.rekonTahun });
-  const res = await fetch(`${CONFIG.SYNC_URL}?${p.toString()}`);
-  const j = await res.json();
-  STATE.rekonStatusCache = j;
-  return j;
+  try{
+    const res = await fetch(`${CONFIG.SYNC_URL}?${p.toString()}`);
+    const j = await res.json();
+    STATE.rekonStatusCache = j;
+    if(!j.ok){ notify('error', `Gagal memuat status upload: ${j.error||'tidak diketahui'}.`,
+      {hint:'Periksa koneksi ke Google Sheets, atau coba pilih ulang PU/Bulan/Tahun.'}); }
+    return j;
+  }catch(err){
+    notify('error', `Gagal memuat status upload: ${err}.`,
+      {hint:'Periksa koneksi internet, atau apakah CONFIG.SYNC_URL sudah benar.'});
+    const fallback={ok:false, error:String(err)};
+    STATE.rekonStatusCache = fallback;
+    return fallback;
+  }
 }
 /* 4. RENDER UTAMA MODUL REKONSILIASI */
 async function renderRekonsiliasi(el){
@@ -3261,18 +3383,34 @@ function renderRekonStatusBar(st){
 
 async function rekonMarkFinal(){
   if(!confirm(`Tandai data ${monthName_(STATE.rekonBulan)} ${STATE.rekonTahun} (${STATE.rekonPU}) sebagai FINAL?\n\nSetelah ini, upload ulang bulan yang sama akan diblokir kecuali kamu batalkan status Final dulu.`)) return;
-  const res = await fetch(CONFIG.SYNC_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
-    body: JSON.stringify({uid:CONFIG.UID, pw:CONFIG.PW, action:'mark_final', pu:STATE.rekonPU, bulan:STATE.rekonBulan, tahun:STATE.rekonTahun, oleh:getAuth().name||'Admin'})});
-  const j = await res.json();
-  if(j.ok) renderModule(); else alert('Gagal menandai Final: '+j.error);
+  const nid=notify('pending', `Menandai ${monthName_(STATE.rekonBulan)} ${STATE.rekonTahun} (${STATE.rekonPU}) sebagai Final…`);
+  try{
+    const res = await fetch(CONFIG.SYNC_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({uid:CONFIG.UID, pw:CONFIG.PW, action:'mark_final', pu:STATE.rekonPU, bulan:STATE.rekonBulan, tahun:STATE.rekonTahun, oleh:getAuth().name||'Admin'})});
+    const j = await res.json();
+    if(j.ok){ updateNotify(nid,'success', `Berhasil ditandai Final: ${monthName_(STATE.rekonBulan)} ${STATE.rekonTahun} (${STATE.rekonPU}).`); renderModule(); }
+    else{ updateNotify(nid,'error', `Gagal menandai Final: ${j.error||'tidak diketahui'}.`,
+      'Periksa koneksi ke Google Sheets, lalu coba lagi.'); }
+  }catch(err){
+    updateNotify(nid,'error', `Gagal menandai Final: ${err}.`,
+      'Periksa koneksi internet, atau apakah CONFIG.SYNC_URL sudah benar.');
+  }
 }
 
 async function rekonUnmarkFinal(){
   if(!confirm(`Batalkan status Final untuk ${monthName_(STATE.rekonBulan)} ${STATE.rekonTahun} (${STATE.rekonPU})?\n\nIni memungkinkan upload ulang, tapi rekonsiliasi yang sedang berjalan sebaiknya diselesaikan dulu.`)) return;
-  const res = await fetch(CONFIG.SYNC_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
-    body: JSON.stringify({uid:CONFIG.UID, pw:CONFIG.PW, action:'unmark_final', pu:STATE.rekonPU, bulan:STATE.rekonBulan, tahun:STATE.rekonTahun})});
-  const j = await res.json();
-  if(j.ok) renderModule(); else alert('Gagal: '+j.error);
+  const nid=notify('pending', `Membatalkan status Final ${monthName_(STATE.rekonBulan)} ${STATE.rekonTahun} (${STATE.rekonPU})…`);
+  try{
+    const res = await fetch(CONFIG.SYNC_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({uid:CONFIG.UID, pw:CONFIG.PW, action:'unmark_final', pu:STATE.rekonPU, bulan:STATE.rekonBulan, tahun:STATE.rekonTahun})});
+    const j = await res.json();
+    if(j.ok){ updateNotify(nid,'success', `Status Final dibatalkan untuk ${monthName_(STATE.rekonBulan)} ${STATE.rekonTahun} (${STATE.rekonPU}).`); renderModule(); }
+    else{ updateNotify(nid,'error', `Gagal membatalkan Final: ${j.error||'tidak diketahui'}.`,
+      'Periksa koneksi ke Google Sheets, lalu coba lagi.'); }
+  }catch(err){
+    updateNotify(nid,'error', `Gagal membatalkan Final: ${err}.`,
+      'Periksa koneksi internet, atau apakah CONFIG.SYNC_URL sudah benar.');
+  }
 }
 /* 5. TAB: SEMUA DOWNTIME (tabel lengkap, filter, inline edit) */
 function renderRekonTabSemua(){
@@ -3559,24 +3697,36 @@ async function rekonCommitDraft(){
   if(!perubahan.length) return;
   if(!confirm(`Simpan ${perubahan.length} perubahan ke Google Sheets?\n\nData asli SIAP_DOWNTIME tidak akan diubah — koreksi disimpan terpisah dan akan ikut memengaruhi perhitungan OEE/Downtime di dashboard.`)) return;
 
-  const saveRes = await fetch(CONFIG.SYNC_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
-    body: JSON.stringify({uid:CONFIG.UID, pw:CONFIG.PW, action:'save_draft',
-      pu:STATE.rekonPU, bulan:STATE.rekonBulan, tahun:STATE.rekonTahun,
-      oleh:getAuth().name||'Tim', perubahan})});
-  const saveJson = await saveRes.json();
-  if(!saveJson.ok){ alert('Gagal menyimpan draft: '+saveJson.error); return; }
+  const nid=notify('pending', `Menyimpan ${perubahan.length} perubahan (langkah 1/2: draft)…`);
+  try{
+    const saveRes = await fetch(CONFIG.SYNC_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({uid:CONFIG.UID, pw:CONFIG.PW, action:'save_draft',
+        pu:STATE.rekonPU, bulan:STATE.rekonBulan, tahun:STATE.rekonTahun,
+        oleh:getAuth().name||'Tim', perubahan})});
+    const saveJson = await saveRes.json();
+    if(!saveJson.ok){
+      updateNotify(nid,'error', `Gagal menyimpan draft: ${saveJson.error||'tidak diketahui'}.`,
+        'Periksa koneksi ke Google Sheets, lalu coba klik "Simpan Perubahan ke Google Sheets" lagi.');
+      return;
+    }
 
-  const commitRes = await fetch(CONFIG.SYNC_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
-    body: JSON.stringify({uid:CONFIG.UID, pw:CONFIG.PW, action:'commit_koreksi',
-      pu:STATE.rekonPU, bulan:STATE.rekonBulan, tahun:STATE.rekonTahun, oleh:getAuth().name||'Tim'})});
-  const commitJson = await commitRes.json();
-  if(commitJson.ok){
-    alert(`✓ ${commitJson.committed} perubahan berhasil disimpan ke Google Sheets.`);
-    STATE.rekonDraft = {};
-    await syncLoad();
-    renderModule();
-  }else{
-    alert('Gagal commit: '+commitJson.error);
+    updateNotify(nid,'pending', `${perubahan.length} perubahan tersimpan sebagai draft. Menyelesaikan (langkah 2/2: commit)…`);
+    const commitRes = await fetch(CONFIG.SYNC_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({uid:CONFIG.UID, pw:CONFIG.PW, action:'commit_koreksi',
+        pu:STATE.rekonPU, bulan:STATE.rekonBulan, tahun:STATE.rekonTahun, oleh:getAuth().name||'Tim'})});
+    const commitJson = await commitRes.json();
+    if(commitJson.ok){
+      updateNotify(nid,'success', `${commitJson.committed} perubahan berhasil disimpan permanen ke Google Sheets. KPI dashboard akan mencerminkan koreksi ini.`);
+      STATE.rekonDraft = {};
+      await syncLoad();
+      renderModule();
+    }else{
+      updateNotify(nid,'error', `Draft tersimpan, tetapi commit gagal: ${commitJson.error||'tidak diketahui'}.`,
+        'Perubahan masih tersimpan sebagai draft (belum permanen). Coba klik "Simpan Perubahan ke Google Sheets" lagi.');
+    }
+  }catch(err){
+    updateNotify(nid,'error', `Gagal menyimpan perubahan: ${err}.`,
+      'Periksa koneksi internet, atau apakah CONFIG.SYNC_URL sudah benar. Draft yang belum tersimpan tidak hilang -- coba lagi setelah koneksi pulih.');
   }
 }
 
