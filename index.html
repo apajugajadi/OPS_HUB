@@ -3335,31 +3335,37 @@ async function handleSIAPFile(file){
     res.innerHTML=`<div class="up-summary">
       <div class="up-sum-h">✓ File terbaca: <b>${file.name}</b></div>
       <div class="up-sum-grid">
-        <div class="up-sum-card"><span class="usc-n">${parsed.downtime.length}</span><span class="usc-l">Downtime</span><span class="usc-s">${shDt||'tidak ada'}</span></div>
+        <div class="up-sum-card"><span class="usc-n">${parsed.downtime.length}</span><span class="usc-l">Downtime (raw)</span><span class="usc-s">${shDt||'tidak ada'}</span></div>
         <div class="up-sum-card"><span class="usc-n">${parsed.hasilProd.length}</span><span class="usc-l">Hasil Produksi</span><span class="usc-s">${shHp||'tidak ada'}</span></div>
         <div class="up-sum-card"><span class="usc-n">${parsed.netOp.length}</span><span class="usc-l">Net Op</span><span class="usc-s">${shNo||'tidak ada'}</span></div>
         <div class="up-sum-card"><span class="usc-n">${parsed.pemakaian.length}</span><span class="usc-l">Pemakaian</span><span class="usc-s">${shPmk||'tidak ada'}</span></div>
       </div>
-      <button class="sync-save-btn" style="margin-top:14px;width:100%" onclick="submitSIAP()">⬆ Kirim ke Google Sheets</button>
+      <p class="md-desc" style="margin-top:10px">Kolom Downtime di file SIAP masih pakai <b>kode kategori pendek</b> (TL, TS, FL, dst) dan belum ada Mesin/OpTime terpisah. Klik tombol di bawah untuk kirim raw ini ke <code>RAW_SIAP_IMPORT</code>, lalu jalankan konversi otomatis (kode→kategori resmi, OpTime dihitung dari durasi negatif).</p>
+      <button class="sync-save-btn" style="margin-top:8px;width:100%" onclick="submitSIAPRawThenConvert()">⬆ Kirim &amp; Convert Downtime</button>
+      <button class="sync-save-btn" style="margin-top:8px;width:100%;background:#666" onclick="submitSIAPNonDowntimeOnly()">Kirim Hasil Produksi/Net Op/Pemakaian saja (tanpa Downtime)</button>
     </div>`;
   }catch(err){
     res.innerHTML=`<div class="up-err">✕ ${err.message}</div>`;
   }
 }
+/* Parser RAW SIAP asli (bukan format SIAP_DOWNTIME backend). Kolom sumber:
+   Tgl post, Line, Detail, Sebab (OP/TR), Kategori (kode pendek TL/TS/FL...), Durasi.
+   Baris ini TIDAK langsung dikirim sebagai downtime siap pakai -- dikirim ke backend
+   (action:'save_raw_import' lalu 'convert_raw_siap') supaya konversi kode->kategori
+   resmi dan perhitungan OpTime konsisten satu sumber (lihat modul konversi di .gs). */
 function parseDowntimeSheet(sh){
   const rows=XLSX.utils.sheet_to_json(sh,{header:1,defval:''});
-  // cari header row (yg punya 'Kategori'/'Durasi')
   let hr=-1;
   for(let i=0;i<Math.min(rows.length,8);i++){ if(rows[i].some(c=>String(c).toLowerCase().includes('kategori')||String(c).toLowerCase().includes('durasi'))){hr=i;break;} }
   if(hr<0) return [];
   const H=rows[hr].map(x=>String(x).trim());
   const col=(names)=>H.findIndex(h=>names.some(n=>h.toLowerCase().includes(n)));
-  const ci={kat:col(['kategori']),dur:col(['durasi','downtime']),line:col(['line']),tgl:col(['tgl','tanggal']),mesin:col(['mesin']),detail:col(['detail','keterangan'])};
+  const ci={kat:col(['kategori']),dur:col(['durasi']),line:col(['line']),tgl:col(['tgl post','tgl','tanggal']),detail:col(['detail']),sebab:col(['sebab'])};
   const out=[];
   for(let r=hr+1;r<rows.length;r++){
     const row=rows[r]; if(!row||!row.length) continue;
     const dur=parseFloat(row[ci.dur]); if(isNaN(dur)) continue;
-    out.push({kategori:row[ci.kat]||'',durasi:dur,line:row[ci.line]||'',tgl:row[ci.tgl]||'',mesin:row[ci.mesin]||'',detail:row[ci.detail]||''});
+    out.push({kategori:row[ci.kat]||'', durasi:dur, line:row[ci.line]||'', tglPost:row[ci.tgl]||'', detail:row[ci.detail]||'', sebab:row[ci.sebab]||''});
   }
   return out;
 }
@@ -3376,17 +3382,66 @@ function parseGeneric(sh){
   }
   return out;
 }
-async function submitSIAP(){
+/* Alur baru: (1) kirim baris downtime RAW (kode kategori pendek, apa adanya) ke
+   RAW_SIAP_IMPORT via action save_raw_import, (2) panggil convert_raw_siap supaya
+   backend derive Kategori resmi + OpTime + Klasifikasi, (3) baru upload_siap untuk
+   hasilProd/netOp/pemakaian yang sudah dalam format final (tidak perlu konversi). */
+async function submitSIAPRawThenConvert(){
+  const parsed=window._siapParsed; if(!parsed){alert('Pilih file dulu');return;}
+  const pu=document.getElementById('upPU').value;
+  const bulan=parseInt(document.getElementById('upBulan').value);
+  const tahun=parseInt(document.getElementById('upTahun').value);
+  const res=document.getElementById('upResult');
+  if(typeof CONFIG==='undefined' || !CONFIG.USE_LIVE || !CONFIG.SYNC_URL || CONFIG.SYNC_URL.includes('PASTE_URL')){
+    alert('Fitur ini butuh Google Sheets tersambung (lihat Panduan Fase 2).\n\nPreview: '+parsed.downtime.length+' baris raw siap dikonversi untuk '+pu+' bulan '+bulan+'/'+tahun);
+    return;
+  }
+  try{
+    res.innerHTML='<div class="up-loading">⏳ Mengirim baris raw ke RAW_SIAP_IMPORT…</div>';
+    const rowsForImport = parsed.downtime.map(d=>({tglPost:d.tglPost, line:d.line, detail:d.detail, sebab:d.sebab, kategori:d.kategori, durasi:d.durasi}));
+    await postSync_({action:'save_raw_import', uid:CONFIG.UID, pw:CONFIG.PW, pu, bulan, tahun, rows:rowsForImport});
+
+    res.innerHTML='<div class="up-loading">⏳ Menjalankan konversi (kode kategori → nama resmi, hitung OpTime)…</div>';
+    const conv = await postSync_({action:'convert_raw_siap', uid:CONFIG.UID, pw:CONFIG.PW, pu, bulan, tahun, oleh:CONFIG.UID});
+
+    if(conv.hasilProd || parsed.hasilProd.length || parsed.netOp.length || parsed.pemakaian.length){
+      await uploadSIAP({pu, bulan, tahun, downtime:[], hasilProd:parsed.hasilProd, netOp:parsed.netOp, pemakaian:parsed.pemakaian, skipDowntimeReplace:true});
+    }
+
+    res.innerHTML=`<div class="up-summary">
+      <div class="up-sum-h">✓ Konversi selesai</div>
+      <p class="md-desc">${conv.barisMasuk} baris raw diproses → <b>${conv.barisJadiDowntime}</b> baris downtime, <b>${conv.barisJadiOpTime}</b> baris OpTime agregat.</p>
+      ${conv.kodeTidakDikenal && conv.kodeTidakDikenal.length ? `<div class="md-warn">⚠ Kode belum dikenal: <b>${conv.kodeTidakDikenal.join(', ')}</b>. Baris terkait masuk dengan label "PERLU MAPPING" — lengkapi di tab MD_KODE_KATEGORI lalu convert ulang.</div>` : ''}
+    </div>`;
+    if(typeof syncLoad==='function') syncLoad();
+  }catch(err){
+    res.innerHTML=`<div class="up-err">✕ ${err.message}</div>`;
+  }
+}
+
+/* Kalau file cuma dipakai untuk Hasil Produksi/Net Op/Pemakaian (downtime sudah
+   direkonsiliasi manual/lewat jalur lain), kirim tanpa menyentuh SIAP_DOWNTIME. */
+async function submitSIAPNonDowntimeOnly(){
   const parsed=window._siapParsed; if(!parsed){alert('Pilih file dulu');return;}
   const pu=document.getElementById('upPU').value;
   const bulan=parseInt(document.getElementById('upBulan').value);
   const tahun=parseInt(document.getElementById('upTahun').value);
   if(typeof uploadSIAP==='function'){
-    await uploadSIAP({pu,bulan,tahun,...parsed});
+    await uploadSIAP({pu,bulan,tahun, downtime:[], hasilProd:parsed.hasilProd, netOp:parsed.netOp, pemakaian:parsed.pemakaian, skipDowntimeReplace:true});
     closeUploadModal();
   }else{
-    alert('Fitur upload aktif setelah Google Sheets tersambung (lihat Panduan Fase 2).\n\nPreview: '+parsed.downtime.length+' baris downtime siap dikirim untuk '+pu+' bulan '+bulan+'/'+tahun);
+    alert('Fitur upload aktif setelah Google Sheets tersambung (lihat Panduan Fase 2).');
   }
+}
+
+/* Helper POST kecil, dipakai submitSIAPRawThenConvert. Asumsikan sudah ada fungsi
+   sejenis di sync patch (postSync_/fetch ke CONFIG.SYNC_URL) -- kalau nama beda,
+   sesuaikan pemanggilan di atas dengan fungsi POST yang sudah ada di file sync. */
+async function postSync_(body){
+  const res = await fetch(CONFIG.SYNC_URL, {method:'POST', body:JSON.stringify(body)});
+  const j = await res.json();
+  if(!j.ok) throw new Error(j.message||j.error||'Gagal memproses permintaan');
+  return j;
 }
 
 /* ==================== SINKRONISASI GOOGLE SHEETS (Fase 2) ==================== */
