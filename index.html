@@ -967,7 +967,7 @@ const DB = JSON.parse(document.getElementById('seed').textContent);
 const OEE = (function(){ const el=document.getElementById('oeeseed'); return el?JSON.parse(el.textContent):null; })();
 
 const CONFIG = {
-  SYNC_URL: 'https://script.google.com/macros/s/AKfycbxcHdeIQrKe58cvw7s0JRImi20_Wxtnir2jjtlFX2IZs5443A9OVpvEbhlKlBGcjm4c/exec',
+  SYNC_URL: 'https://script.google.com/macros/s/AKfycbwAl95MwJ9T9Xl-MIZsNgVzMXKa-iWQWm92Es2CFHH7jmg8zhsL4oYCZ0ug4TSQdcmk/exec',
   UID: sessionStorage.getItem('ophub_uid') || '',
   PW: sessionStorage.getItem('ophub_pw') || '',
   USE_LIVE: true
@@ -990,7 +990,11 @@ const STATE = { pu:'ALL', mFrom:1, mTo:5, module:'downtime', drill:null, onlyRek
   kapOverride:{},   // {pu|mesin|ukuran: newKapasitas} — edit kapasitas, recalc OEE
   mesinExclude:{},  // {pu|mesin: true} — exclude dari perhitungan OEE
   mesinAdd:[],      // mesin tambahan manual [{pu,tipe,mesin,A,P,Q,...}]
-  tipeCustom:[] };  // tipe tambahan selain default
+  tipeCustom:[],    // tipe tambahan selain default
+  detailSort:{col:'durasi', dir:'desc'}, detailSearch:'', detailLimit:200,
+  mitigasi:{actions:[], log:[], loaded:false, loading:false, filterFungsi:'ALL', filterStatus:'ALL', search:'', tab:'board'},
+  trenDim:'kat',
+  costParam:{PUJ:{costPerJam:0,costPerKL:0}, PUC:{costPerJam:0,costPerKL:0}, PUG:{costPerJam:0,costPerKL:0}} };
 
 /* Resolve tolerance factor for an event row, with priority:
    kat > sub > fungsi (most specific wins; never double). Returns {factor, rule} or {factor:1,rule:null}. */
@@ -1006,6 +1010,12 @@ function tolFor(r){
 }
 function netVal(r){ return r[5]*tolFor(r).factor; }
 function rawVal(r){ return r[5]; }
+/* Hitung cost Rupiah 1 baris downtime, 2 metode sekaligus:
+   byJam = jam net downtime × Rp/jam produksi PU itu; byKL = Loss KL × Rp/KL PU itu. */
+function costOfRow_(r){
+  const cp=STATE.costParam[PU_NAME[r[0]]]||{costPerJam:0,costPerKL:0};
+  return {byJam: netVal(r)*(cp.costPerJam||0), byKL: r[6]*(cp.costPerKL||0)};
+}
 
 const MN = {1:'Jan',2:'Feb',3:'Mar',4:'Apr',5:'Mei',6:'Jun',7:'Jul',8:'Agu',9:'Sep',10:'Okt',11:'Nov',12:'Des'};
 
@@ -1017,6 +1027,7 @@ const MODULES = {
   capacity:{label:'Capacity vs Demand',icon:'▦',ready:false,render:()=>placeholder('▦','Capacity vs Demand','Utilisasi aktual vs kapasitas terpasang & proyeksi RJPP.',['Sheet: CAPACITY_DATA','Utilisasi per PU','Bottleneck forecast','Gap kapasitas tahunan'])},
   master:{label:'Master Data',icon:'⚙',ready:true,render:renderMasterData},
   rekonsiliasi:{label:'Rekonsiliasi',icon:'🔍',ready:true,render:renderRekonsiliasi},
+  mitigasi:{label:'Mitigasi',icon:'🎯',ready:true,render:renderMitigasi},
 };
 
 /* ---- helpers ---- */
@@ -1222,13 +1233,242 @@ function renderDowntime(el){
     <div class="dt-subtabs">
       <button class="dt-subtab ${STATE.dtTab==='ringkasan'?'on':''}" onclick="setDtTab('ringkasan')">📊 Ringkasan</button>
       <button class="dt-subtab ${STATE.dtTab==='analitik'?'on':''}" onclick="setDtTab('analitik')">🔬 Analitik Lanjutan</button>
+      <button class="dt-subtab ${STATE.dtTab==='tren'?'on':''}" onclick="setDtTab('tren')">📈 Tren & Grouping</button>
+      <button class="dt-subtab ${STATE.dtTab==='detail'?'on':''}" onclick="setDtTab('detail')">📋 Detail Event</button>
     </div>
     <div id="dtBody"></div>`;
   if(STATE.dtTab==='ringkasan') renderRingkasan(document.getElementById('dtBody'));
-  else renderAnalitik(document.getElementById('dtBody'));
+  else if(STATE.dtTab==='analitik') renderAnalitik(document.getElementById('dtBody'));
+  else if(STATE.dtTab==='tren') renderTrenGrouping(document.getElementById('dtBody'));
+  else renderDetailEvent(document.getElementById('dtBody'));
 }
 function setDtTab(t){ STATE.dtTab=t; renderModule(); }
 function setAnalitikView(v){ STATE.analitikView=v; renderModule(); }
+
+/* ============================================================ TREN & GROUPING (align dengan OpTime) */
+/* Cari PIC buat 1 baris downtime, prioritas kat > sub > fungsi (sama seperti tolFor). */
+function picForRow_(r){
+  const katName=DB.kat[r[3]], subName=DB.sub[r[11]], fnName=DB.fungsi[r[4]];
+  for(const lvl of ['kat','sub','fungsi']){
+    const name = lvl==='kat'?katName : lvl==='sub'?subName : fnName;
+    const pic=(STATE.pic[lvl]||{})[name];
+    if(pic) return pic;
+  }
+  return '';
+}
+const TREN_DIMS={fungsi:'Fungsi',kat:'Kategori',sebab:'Sebab',pic:'PIC',produk:'Produk',mesin:'Line/Mesin'};
+function trenGroupKey_(r,dim){
+  if(dim==='fungsi') return DB.fungsi[r[4]]||'(kosong)';
+  if(dim==='kat') return DB.kat[r[3]]||'(kosong)';
+  if(dim==='sebab') return DB.sebabList[r[16]]||'(kosong)';
+  if(dim==='mesin') return DB.mesin[r[2]]||'(kosong)';
+  if(dim==='produk') return (DB.produk&&r[19]!=null)?(DB.produk[r[19]]||'(kosong)'):'(kosong)';
+  if(dim==='pic') return picForRow_(r)||'(belum ada PIC)';
+  return '(kosong)';
+}
+/* Bangun data bulanan LINTAS SEMUA BULAN yang ada (bukan cuma periode yang lagi difilter,
+   supaya trend-nya kelihatan utuh), tapi tetap hormati filter PU. Sekalian hitung OpTime
+   total per bulan (dan per mesin per bulan) supaya downtime bisa "dialign" ke OpTime —
+   jadi turunnya jam downtime nggak salah dibaca sebagai perbaikan kalau ternyata OpTime-nya
+   juga turun (produksi lagi sepi). */
+function trenMonthlyData_(dim){
+  const rows = DB.dt.filter(r=>inPU(r[0]));
+  const opRows = DB.op.filter(r=>inPU(r[0]));
+  const months = [...new Set([...rows.map(r=>r[1]), ...opRows.map(r=>r[1])].filter(m=>m>0))].sort((a,b)=>a-b);
+  const opByMonth={}, opByMesinMonth={};
+  opRows.forEach(r=>{ opByMonth[r[1]]=(opByMonth[r[1]]||0)+r[3]; const k=DB.mesin[r[2]]+'|'+r[1]; opByMesinMonth[k]=(opByMesinMonth[k]||0)+r[3]; });
+  const byGroupMonth={}, byMonth={};
+  rows.forEach(r=>{
+    const g=trenGroupKey_(r,dim), m=r[1], raw=rawVal(r), net=netVal(r);
+    if(!byGroupMonth[g]) byGroupMonth[g]={};
+    if(!byGroupMonth[g][m]) byGroupMonth[g][m]={raw:0,net:0,n:0};
+    byGroupMonth[g][m].raw+=raw; byGroupMonth[g][m].net+=net; byGroupMonth[g][m].n++;
+    if(!byMonth[m]) byMonth[m]={raw:0,net:0};
+    byMonth[m].raw+=raw; byMonth[m].net+=net;
+  });
+  return {months, byGroupMonth, byMonth, opByMonth, opByMesinMonth};
+}
+function setTrenDim(d){ STATE.trenDim=d; renderModule(); }
+
+function renderTrenGrouping(el){
+  const dim=STATE.trenDim||'kat';
+  const D=trenMonthlyData_(dim);
+  const months=D.months;
+  if(!months.length){
+    el.innerHTML=`${renderPeriodControls()}<div class="placeholder"><div class="pic">📈</div><h2>Belum ada data</h2></div>`; return;
+  }
+  const lastM=months[months.length-1], prevM=months.length>1?months[months.length-2]:null;
+
+  // urutan grup: total net terbesar dulu
+  const groups=Object.keys(D.byGroupMonth).sort((a,b)=>{
+    const ta=Object.values(D.byGroupMonth[a]).reduce((s,v)=>s+v.net,0);
+    const tb=Object.values(D.byGroupMonth[b]).reduce((s,v)=>s+v.net,0);
+    return tb-ta;
+  });
+  const top6=groups.slice(0,6), rest=groups.slice(6);
+
+  // rasio keseluruhan per bulan (net/optime %) — konteks buat lihat "beneran turun atau optime-nya juga turun"
+  const ratioOf=m=> (D.opByMonth[m]>0 ? D.byMonth[m].net/D.opByMonth[m]*100 : 0);
+  const ratioLast=ratioOf(lastM), ratioPrev=prevM!=null?ratioOf(prevM):null;
+
+  // tabel ranking per grup dgn delta bulan terakhir vs sebelumnya
+  const rowsTable=groups.map(g=>{
+    const cur=(D.byGroupMonth[g][lastM]||{net:0,raw:0,n:0});
+    const prev=prevM!=null?(D.byGroupMonth[g][prevM]||{net:0,raw:0,n:0}):null;
+    const delta = prev!=null ? cur.net-prev.net : null;
+    // rasio pembanding: kalau dim=mesin, pakai optime mesin itu sendiri (akurat); selain itu pakai rasio total (konteks)
+    let curRatio=null, prevRatio=null;
+    if(dim==='mesin'){
+      const opCur=D.opByMesinMonth[g+'|'+lastM]||0, opPrev=prevM!=null?(D.opByMesinMonth[g+'|'+prevM]||0):0;
+      curRatio = opCur>0? cur.net/opCur*100 : null;
+      prevRatio = (prevM!=null && opPrev>0) ? prev.net/opPrev*100 : null;
+    }else{
+      curRatio=ratioLast; prevRatio=ratioPrev;
+    }
+    const ratioDelta = (curRatio!=null && prevRatio!=null) ? curRatio-prevRatio : null;
+    let badge='';
+    if(delta!=null && Math.abs(delta)>0.05){
+      if(delta<0){
+        badge = (ratioDelta!=null && ratioDelta<=0.05)
+          ? `<span class="chip dn">✅ Perbaikan nyata</span>`
+          : `<span class="chip up">⚠ Jam turun, tapi rasio ${dim==='mesin'?'mesin ini':'keseluruhan'} tidak ikut turun — kemungkinan cuma karena OpTime turun juga</span>`;
+      }else{
+        badge = `<span class="chip up">🔺 Naik ${fmt.n(delta,2)} jam</span>`;
+      }
+    }
+    return {g, cur, prev, delta, curRatio, ratioDelta, badge};
+  });
+
+  Chart.defaults.color='#9fb1c4';Chart.defaults.font.family="'Spline Sans Mono',monospace";Chart.defaults.font.size=11;Chart.defaults.borderColor='#2a3848';
+  const palette=['#5b9dff','#3ad6c4','#a989ff','#ffb020','#ff8a3d','#85b7eb','#5a4a2a'];
+  const datasets=top6.map((g,i)=>({type:'bar',label:g.length>18?g.slice(0,18)+'…':g,stack:'dt',
+    data:months.map(m=>+((D.byGroupMonth[g][m]||{net:0}).net).toFixed(2)), backgroundColor:palette[i%palette.length]}));
+  if(rest.length) datasets.push({type:'bar',label:'Lainnya',stack:'dt',
+    data:months.map(m=>+rest.reduce((s,g)=>s+((D.byGroupMonth[g][m]||{net:0}).net),0).toFixed(2)), backgroundColor:'#33414f'});
+  datasets.push({type:'line',label:'DT Ratio Net % (vs OpTime)',yAxisID:'y1',borderColor:'#ff5c5c',backgroundColor:'#ff5c5c',
+    tension:.3,pointRadius:3,data:months.map(m=>+ratioOf(m).toFixed(1))});
+
+  el.innerHTML=`
+    ${renderPeriodControls()}
+    ${renderBreadcrumb()}
+    <div class="sec-label">Tren Bulanan & Grouping · di-align ke OpTime supaya "turun" gak salah dibaca sebagai perbaikan</div>
+    <div class="panel" style="margin-bottom:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:12px;color:var(--ink2)">Kelompokkan by:</span>
+      ${Object.entries(TREN_DIMS).map(([k,label])=>`<button class="pchip ${dim===k?'on':''}" onclick="setTrenDim('${k}')">${label}</button>`).join('')}
+    </div>
+    <div class="panel" style="margin-bottom:14px">
+      <div class="panel-h"><h3>Downtime Net per Bulan (stacked, top 6 ${TREN_DIMS[dim]}) vs DT Ratio</h3>
+        <span class="hint">batang = jam net · garis merah = rasio thd OpTime — kalau batang turun tapi garis merah nggak ikut turun, itu tanda OpTime-nya juga lagi turun, bukan perbaikan murni</span></div>
+      <div style="height:320px"><canvas id="trenGroupChart"></canvas></div>
+    </div>
+    <div class="panel" style="overflow-x:auto">
+      <table class="md-table">
+        <thead><tr><th>${TREN_DIMS[dim]}</th><th class="num">Net Bulan Ini</th><th class="num">Net Bulan Lalu</th><th class="num">Δ Jam</th><th>Catatan</th></tr></thead>
+        <tbody>
+          ${rowsTable.map(x=>`<tr>
+            <td>${x.g}</td>
+            <td class="num">${fmt.n(x.cur.net,2)}</td>
+            <td class="num" style="color:var(--ink3)">${x.prev?fmt.n(x.prev.net,2):'-'}</td>
+            <td class="num" style="color:${x.delta==null?'var(--ink3)':x.delta<0?'var(--teal,#3ad6c4)':'var(--amber)'}">${x.delta==null?'-':(x.delta>0?'+':'')+fmt.n(x.delta,2)}</td>
+            <td style="font-size:11px">${x.badge||'-'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      <div style="padding:10px 4px;font-size:11px;color:var(--ink3)">
+        ${dim==='mesin' ? 'Rasio dihitung per mesin (akurat, OpTime mesin itu sendiri).' : `Rasio konteks pakai DT Ratio total (semua mesin, PU ${STATE.pu==='ALL'?'semua':STATE.pu}) karena OpTime tidak dipecah per ${TREN_DIMS[dim].toLowerCase()} — dipakai buat sanity-check, bukan rasio eksak per baris.`}
+      </div>
+    </div>`;
+  charts.push(new Chart(document.getElementById('trenGroupChart'),{
+    data:{labels:months.map(m=>MN[m]), datasets},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{boxWidth:10,font:{size:10}}}},
+      scales:{
+        y:{stacked:true,beginAtZero:true,grid:{color:'#1f2a36'},title:{display:true,text:'jam'}},
+        y1:{position:'right',min:0,grid:{display:false},ticks:{callback:v=>v+'%'},title:{display:true,text:'DT Ratio %'}},
+        x:{stacked:true,grid:{display:false}}
+      }}}));
+}
+
+/* ============================================================ DETAIL EVENT (tabel mentah, sortable) */
+function detailSortKey_(row, col){
+  if(col==='durasi') return row.net;
+  if(col==='durasiRaw') return row.raw;
+  if(col==='tgl') return row.tglSort;
+  return String(row[col]||'').toLowerCase();
+}
+function setDetailSort(col){
+  if(STATE.detailSort.col===col) STATE.detailSort.dir = STATE.detailSort.dir==='asc'?'desc':'asc';
+  else STATE.detailSort = {col, dir: (col==='durasi'||col==='durasiRaw')?'desc':'asc'};
+  renderModule();
+}
+function setDetailSearch(v){ STATE.detailSearch=v; STATE.detailLimit=200; renderModule(); }
+function expandDetailLimit(){ STATE.detailLimit += 500; renderModule(); }
+
+function renderDetailEvent(el){
+  const rows = filteredDT().map(r=>{
+    const tglStr=r[9]||'';
+    const [dd,mm]=tglStr.split('/').map(Number);
+    return {
+      pu:PU_NAME[r[0]], line:r[10]||DB.mesin[r[2]]||'', mesin:DB.mesin[r[2]]||'',
+      produk: (DB.produk && r[19]!=null) ? (DB.produk[r[19]]||'') : '',
+      batch: r[20]||'', kimap:r[21]||'', solusi:r[22]||'', awal:r[23]||'', akhir:r[24]||'',
+      kategori:DB.kat[r[3]]||'', fungsi:DB.fungsi[r[4]]||'', sebab:DB.sebabList[r[16]]||'',
+      detail:r[8]||'', tgl:tglStr, tglSort:(mm||0)*100+(dd||0),
+      raw:rawVal(r), net:netVal(r)
+    };
+  });
+  const q=(STATE.detailSearch||'').toLowerCase().trim();
+  const filtered = q ? rows.filter(x=>
+    x.produk.toLowerCase().includes(q) || x.batch.toLowerCase().includes(q) || x.kimap.toLowerCase().includes(q) ||
+    x.detail.toLowerCase().includes(q) || x.solusi.toLowerCase().includes(q) || x.line.toLowerCase().includes(q) ||
+    x.kategori.toLowerCase().includes(q)) : rows;
+  const {col,dir}=STATE.detailSort;
+  filtered.sort((a,b)=>{
+    const av=detailSortKey_(a,col), bv=detailSortKey_(b,col);
+    const cmp = typeof av==='number' ? av-bv : String(av).localeCompare(String(bv));
+    return dir==='asc'?cmp:-cmp;
+  });
+  const shown = filtered.slice(0, STATE.detailLimit);
+  const arrow = c => STATE.detailSort.col===c ? (STATE.detailSort.dir==='asc'?' ▲':' ▼') : '';
+  const th = (label,col)=>`<th onclick="setDetailSort('${col}')" style="cursor:pointer;white-space:nowrap">${label}${arrow(col)}</th>`;
+  el.innerHTML = `
+    ${renderPeriodControls()}
+    ${renderTolBar(aggregate())}
+    ${renderBreadcrumb()}
+    <div class="sec-label">Detail Event Downtime · ${periodLabel()} · ${fmt.n(filtered.length)} event (produk, batch, tanggal ikut tersimpan — klik header buat sort)</div>
+    <div class="panel" style="margin-bottom:12px">
+      <input type="text" placeholder="Cari produk / batch / line / kategori / detail…" value="${STATE.detailSearch||''}"
+        oninput="setDetailSearch(this.value)" style="width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:8px;padding:9px 12px;color:var(--ink);font-size:13px">
+    </div>
+    <div class="panel" style="overflow-x:auto">
+      <table class="md-table">
+        <thead><tr>
+          ${th('Tanggal','tgl')}${th('PU','pu')}${th('Line/Mesin','line')}${th('Kimap','kimap')}${th('Produk','produk')}${th('Batch','batch')}
+          ${th('Kategori','kategori')}${th('Sebab','sebab')}<th>Jam</th><th>Detail</th><th>Solusi</th>${th('Raw (jam)','durasiRaw')}${th('Net (jam)','durasi')}
+        </tr></thead>
+        <tbody>
+          ${shown.map(x=>`<tr>
+            <td class="mono">${x.tgl||'-'}</td>
+            <td><span class="tag ${PU_TAG[PU_IDX[x.pu]]}">${x.pu}</span></td>
+            <td>${x.line||'-'}</td>
+            <td class="mono">${x.kimap||'<i style=opacity:.4>-</i>'}</td>
+            <td>${x.produk||'<i style=opacity:.4>-</i>'}</td>
+            <td class="mono">${x.batch||'<i style=opacity:.4>-</i>'}</td>
+            <td>${x.kategori||'-'}</td>
+            <td>${x.sebab||'-'}</td>
+            <td class="mono" style="white-space:nowrap">${x.awal&&x.akhir?x.awal+'–'+x.akhir:'-'}</td>
+            <td style="color:var(--ink2)">${x.detail||'-'}</td>
+            <td style="color:var(--ink3)">${x.solusi||'<i style=opacity:.4>-</i>'}</td>
+            <td class="num" style="color:var(--ink3)">${fmt.n(x.raw,2)}</td>
+            <td class="num" style="color:${x.net>2?'var(--amber)':'var(--ink2)'}">${fmt.n(x.net,2)}</td>
+          </tr>`).join('') || '<tr><td colspan=13 style="text-align:center;padding:24px;color:var(--ink3)">Tidak ada event yang cocok</td></tr>'}
+        </tbody>
+      </table>
+      ${filtered.length>STATE.detailLimit ? `<div style="text-align:center;padding:12px">
+        <button class="pchip" onclick="expandDetailLimit()">Tampilkan ${Math.min(500,filtered.length-STATE.detailLimit)} lagi (${STATE.detailLimit}/${filtered.length})</button>
+      </div>` : ''}
+    </div>`;
+}
 
 function renderRingkasan(el){
   const A=aggregate();
@@ -2041,26 +2281,36 @@ function renderBreakdownWaiting(el){
     </div>`;
 }
 
-/* ---- B. Cost of Downtime (berbasis Opportunity Loss KL — Rupiah belum diisi di workbook) ---- */
+/* ---- B. Cost of Downtime (Opportunity Loss KL + Rupiah, kalau Cost Parameter di Master Data sudah diisi) ---- */
 function renderCostDowntime(el){
   const dt=filteredDT();
   const byKat={};
-  let totKl=0,totNet=0;
-  for(const r of dt){ const k=DB.kat[r[3]]; if(!byKat[k])byKat[k]={kl:0,net:0,n:0}; byKat[k].kl+=r[6];byKat[k].net+=netVal(r);byKat[k].n++; totKl+=r[6];totNet+=netVal(r); }
+  let totKl=0,totNet=0,totCostJam=0,totCostKL=0;
+  for(const r of dt){
+    const k=DB.kat[r[3]]; if(!byKat[k])byKat[k]={kl:0,net:0,n:0,costJam:0,costKL:0};
+    const c=costOfRow_(r);
+    byKat[k].kl+=r[6];byKat[k].net+=netVal(r);byKat[k].n++; byKat[k].costJam+=c.byJam; byKat[k].costKL+=c.byKL;
+    totKl+=r[6];totNet+=netVal(r); totCostJam+=c.byJam; totCostKL+=c.byKL;
+  }
+  const hasCost = totCostJam>0 || totCostKL>0;
   const byCost=Object.entries(byKat).map(([k,v])=>({kat:k,...v,klPerJam:v.net>0?v.kl/v.net:0})).sort((a,b)=>b.kl-a.kl);
   const byTime=[...byCost].sort((a,b)=>b.net-a.net);
   const topCost=byCost.slice(0,10);
   el.innerHTML=`
-    <div class="an-intro">Downtime termahal <b>belum tentu</b> yang terlama. Downtime pendek di line bervolume tinggi bisa lebih besar kerugiannya. Pakai <b>Opportunity Loss (KL)</b> untuk prioritas berbasis volume kehilangan. <span style="color:var(--ink3)">(Kolom Rupiah belum diisi di workbook — saat diisi/ada harga per KL di Master Data, otomatis jadi Rupiah.)</span></div>
+    <div class="an-intro">Downtime termahal <b>belum tentu</b> yang terlama. Downtime pendek di line bervolume tinggi bisa lebih besar kerugiannya. Pakai <b>Opportunity Loss (KL)</b> untuk prioritas berbasis volume kehilangan.
+    ${hasCost ? '' : ' <span style="color:var(--ink3)">(Kolom Rupiah masih 0 — isi Cost Parameter di Master Data → 💰 Cost Parameter biar otomatis kehitung.)</span>'}</div>
     <div class="hero hero-kpi" style="margin-bottom:14px">
       <div class="hcard feat"><div class="k">Total Opportunity Loss</div><div class="v">${fmt.n(totKl)}<small> KL</small></div><div class="sub">volume produksi hilang</div></div>
-      <div class="hcard"><div class="k">KL per Jam Downtime</div><div class="v">${fmt.n(totNet>0?totKl/totNet:0,1)}<small> KL/j</small></div><div class="sub">rata² seluruh kategori</div></div>
-      <div class="hcard"><div class="k">Kategori Termahal</div><div class="v" style="font-size:18px">${byCost[0]?byCost[0].kat.slice(0,18):'—'}</div><div class="sub">${byCost[0]?fmt.n(byCost[0].kl)+' KL':''}</div></div>
+      ${hasCost ? `
+      <div class="hcard"><div class="k">Cost by Jam Produksi</div><div class="v" style="font-size:18px">${fmt.rp(totCostJam)}</div><div class="sub">jam net × Rp/jam per PU</div></div>
+      <div class="hcard"><div class="k">Cost by Opportunity Loss</div><div class="v" style="font-size:18px">${fmt.rp(totCostKL)}</div><div class="sub">KL × Rp/KL per PU</div></div>`
+      : `<div class="hcard"><div class="k">KL per Jam Downtime</div><div class="v">${fmt.n(totNet>0?totKl/totNet:0,1)}<small> KL/j</small></div><div class="sub">rata² seluruh kategori</div></div>
+      <div class="hcard"><div class="k">Kategori Termahal</div><div class="v" style="font-size:18px">${byCost[0]?byCost[0].kat.slice(0,18):'—'}</div><div class="sub">${byCost[0]?fmt.n(byCost[0].kl)+' KL':''}</div></div>`}
     </div>
     <div class="grid g2">
-      <div class="panel"><div class="panel-h"><h3>Top Kategori by Opportunity Loss</h3><span class="hint">KL volume hilang</span></div>
-        <table class="md-table"><thead><tr><th>Kategori</th><th class="num">Loss (KL)</th><th class="num">Net Jam</th><th class="num">KL/jam</th></tr></thead>
-        <tbody>${topCost.map(x=>`<tr><td>${x.kat.length>24?x.kat.slice(0,24)+'…':x.kat}</td><td class="num" style="color:var(--amber)">${fmt.n(x.kl)}</td><td class="num">${fmt.n(x.net)}</td><td class="num">${fmt.n(x.klPerJam,1)}</td></tr>`).join('')}</tbody></table>
+      <div class="panel"><div class="panel-h"><h3>Top Kategori by Opportunity Loss</h3><span class="hint">KL volume hilang${hasCost?' + Rupiah':''}</span></div>
+        <table class="md-table"><thead><tr><th>Kategori</th><th class="num">Loss (KL)</th><th class="num">Net Jam</th>${hasCost?'<th class="num">Cost (Jam)</th><th class="num">Cost (KL)</th>':'<th class="num">KL/jam</th>'}</tr></thead>
+        <tbody>${topCost.map(x=>`<tr><td>${x.kat.length>24?x.kat.slice(0,24)+'…':x.kat}</td><td class="num" style="color:var(--amber)">${fmt.n(x.kl)}</td><td class="num">${fmt.n(x.net)}</td>${hasCost?`<td class="num">${fmt.rp(x.costJam)}</td><td class="num">${fmt.rp(x.costKL)}</td>`:`<td class="num">${fmt.n(x.klPerJam,1)}</td>`}</tr>`).join('')}</tbody></table>
       </div>
       <div class="panel"><div class="panel-h"><h3>Mahal ≠ Lama</h3><span class="hint">ranking loss vs ranking waktu</span></div>
         <p class="md-desc">Kategori yang ranking loss-nya jauh lebih tinggi dari ranking waktunya = "boros volume per jam", prioritaskan meski durasinya pendek.</p>
@@ -2253,6 +2503,7 @@ function renderActionTracking(el){
               <button class="${a.status==='closed'?'on':''}" onclick="setActionStatus('${k}','closed')">Closed</button>
             </div>
             <input class="act-pic" placeholder="PIC (${picEff.pic})" value="${a.pic||''}" onchange="setActionPic('${k}',this.value)">
+            <button class="pchip" style="margin-left:6px" onclick="openCreateActionModal('${DB.kat[r.ki].replace(/'/g,"\\'")}','${DB.fungsi[r.fi].replace(/'/g,"\\'")}')">🎯 Buat Action Mitigasi</button>
           </div>
           <input class="act-note" placeholder="Catatan tindakan…" value="${(a.note||'').replace(/"/g,'&quot;')}" onchange="setActionNote('${k}',this.value)">
         </div>`;
@@ -2374,7 +2625,7 @@ function resetPic(){ if(confirm('Reset semua PIC ke placeholder default?')){ STA
 function setMasterTab(t){ STATE.masterTab=t; renderModule(); }
 
 function renderMasterData(el){
-  const tabs=[['pic','PIC & Penanggung Jawab'],['klasifikasi','Klasifikasi Downtime'],['mapping','Mapping Kategori→Fungsi'],['mesin','Mesin & Tipe'],['kapasitas','Kapasitas Mesin'],['target','Target'],['toleransi','Toleransi']];
+  const tabs=[['pic','PIC & Penanggung Jawab'],['klasifikasi','Klasifikasi Downtime'],['mapping','Mapping Kategori→Fungsi'],['mesin','Mesin & Tipe'],['kapasitas','Kapasitas Mesin'],['target','Target'],['toleransi','Toleransi'],['cost','💰 Cost Parameter']];
   if(CURRENT_USER.role==='admin') tabs.push(['admin','⚙ Kelola User & Log']);
   el.innerHTML=`
     <div class="md-warn">⚠ Perubahan di sini aktif selama sesi ini. Penyimpanan permanen aktif setelah koneksi Google Sheets.</div>
@@ -2387,6 +2638,7 @@ function renderMasterData(el){
   else if(STATE.masterTab==='mesin') c.innerHTML=renderMesinMaster();
   else if(STATE.masterTab==='kapasitas') c.innerHTML=renderKapasitasMaster();
   else if(STATE.masterTab==='target') c.innerHTML=renderTargetMaster();
+  else if(STATE.masterTab==='cost') c.innerHTML=renderCostMaster();
   else if(STATE.masterTab==='admin' && CURRENT_USER.role==='admin'){ c.innerHTML='<div class="admin-loading">Memuat…</div>'; renderAdminPanel(c); }
   else c.innerHTML=renderToleransiMaster();
 }
@@ -2488,6 +2740,23 @@ function renderTargetMaster(){
   return `<div class="panel"><div class="panel-h"><h3>Target DT Ratio</h3><span class="hint">edit di tab Downtime → Tabel KPI</span></div>
     <p class="md-desc">Cermin target yang dipakai. Production punya dua target: <b>VP</b> (komitmen) & <b>PU</b> (challenge = jumlah PU + RMP).</p>
     <table class="md-table"><thead><tr><th>Fungsi / Sub / PU</th><th>Target VP</th><th>Target (PU/challenge)</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function setCostParam(pu, field, val){
+  const n=Number(val); if(isNaN(n)||n<0) return;
+  if(!STATE.costParam[pu]) STATE.costParam[pu]={costPerJam:0,costPerKL:0};
+  STATE.costParam[pu][field]=n;
+}
+function renderCostMaster(){
+  const rows=PU_NAME.map(p=>{
+    const cp=STATE.costParam[p]||{costPerJam:0,costPerKL:0};
+    return `<tr><td><span class="tag ${PU_TAG[PU_IDX[p]]}">${p}</span></td>
+      <td class="num"><input class="kap-input" type="number" min="0" value="${cp.costPerJam}" onchange="setCostParam('${p}','costPerJam',this.value)"></td>
+      <td class="num"><input class="kap-input" type="number" min="0" value="${cp.costPerKL}" onchange="setCostParam('${p}','costPerKL',this.value)"></td></tr>`;
+  }).join('');
+  return `<div class="panel"><div class="panel-h"><h3>💰 Cost Parameter per PU</h3><span class="hint">dasar hitung Cost of Downtime dalam Rupiah</span></div>
+    <p class="md-desc">Isi salah satu atau dua-duanya — dashboard <b>Cost of Downtime</b> (tab Downtime → Analitik Lanjutan) dan <b>Scorecard Fungsi</b> (tab Mitigasi) otomatis kalikan:<br>
+    <b>Cost by Jam</b> = jam net downtime × Rp/jam produksi. <b>Cost by KL</b> = Opportunity Loss (KL) × Rp/KL produk. Bisa diubah kapan aja, langsung berlaku setelah "Simpan ke Sheets".</p>
+    <table class="md-table"><thead><tr><th>PU</th><th class="num">Rp / Jam Produksi</th><th class="num">Rp / KL Produk</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 function renderToleransiMaster(){
   const rows=STATE.tolRules.map(r=>`<tr><td><span class="md-lvl ${r.level==='fungsi'?'f':r.level==='sub'?'s':'k'}">${r.level}</span></td><td>${r.target}</td><td>×${r.factor} <span class="md-cut">(potong ${((1-r.factor)*100).toFixed(0)}%)</span></td></tr>`).join('');
@@ -3449,7 +3718,7 @@ async function postSync_(body){
    supaya bisa dipakai ulang oleh doLogin() tanpa perlu fetch payload dua kali. */
 function applyPayload_(d){
   if(d.dt && !d._empty){ Object.assign(DB, {dt:d.dt,op:d.op,mesin:d.mesin,kat:d.kat,fungsi:d.fungsi,sub:d.sub,cls:d.cls,big6:d.big6,
-    sebabList:d.sebabList||['OP','TR'], koreksiInfo:d.koreksiInfo||[]}); }
+    sebabList:d.sebabList||['OP','TR'], koreksiInfo:d.koreksiInfo||[], produk:d.produk||[]}); }
   if(d.oee){
     if(d.oee.kapasitas && d.oee.kapasitas.length) OEE.kapasitas=d.oee.kapasitas;
     if(d.oee.tipeList) OEE.tipeList=d.oee.tipeList;
@@ -3458,6 +3727,7 @@ function applyPayload_(d){
   if(m.pic) STATE.pic=m.pic;
   if(m.tolRules) STATE.tolRules=m.tolRules;
   if(m.actions) STATE.actions=m.actions;
+  if(m.costParam) STATE.costParam=m.costParam;
   if(m.mesin && m.mesin.length){
     STATE.mesinExclude={};
     m.mesin.forEach(r=>{ if(String(r.Include)==='false'||r.Include===false) STATE.mesinExclude[r.PU+'|'+r.Mesin]=true; });
@@ -3517,6 +3787,8 @@ async function syncSaveAll(){
   // target
   const tgtRows=[]; Object.keys(STATE.targets||{}).forEach(f=>tgtRows.push({Level:'fungsi',Target:f,Value:STATE.targets[f]}));
   sections.target=tgtRows;
+  // cost parameter per PU
+  sections.costParam=PU_NAME.map(p=>({PU:p, CostPerJam:(STATE.costParam[p]||{}).costPerJam||0, CostPerKL:(STATE.costParam[p]||{}).costPerKL||0}));
 
   const nid=notify('pending', 'Menyimpan perubahan Master Data ke Google Sheets…');
   try{
@@ -4389,6 +4661,346 @@ async function doLogin(){
     errEl.textContent='Gagal terhubung ke server. Periksa koneksi internet.';
     btn.textContent='Masuk'; btn.disabled=false;
   }
+}
+
+/* ============================================================ MODULE: MITIGASI / ACTION TRACKING */
+async function loadMitigasiIfNeeded_(){
+  if(STATE.mitigasi.loaded || STATE.mitigasi.loading) return;
+  STATE.mitigasi.loading=true;
+  try{
+    const p=new URLSearchParams({uid:CONFIG.UID, pw:CONFIG.PW, action:'get_actions_mitigasi'});
+    const res=await fetch(`${CONFIG.SYNC_URL}?${p.toString()}`);
+    const j=await res.json();
+    if(j.ok){ STATE.mitigasi.actions=j.actions||[]; STATE.mitigasi.log=j.log||[]; STATE.mitigasi.loaded=true; }
+  }catch(err){ /* biarin, tombol refresh manual tersedia */ }
+  STATE.mitigasi.loading=false;
+  renderModule();
+}
+function refreshMitigasi(){ STATE.mitigasi.loaded=false; loadMitigasiIfNeeded_(); }
+
+function isActionOverdue_(a){
+  if(a.Status==='Selesai' || !a.TargetSelesai) return false;
+  const t=new Date(a.TargetSelesai);
+  if(isNaN(t)) return false;
+  const today=new Date(); today.setHours(0,0,0,0);
+  return t < today;
+}
+function daysOverdue_(a){
+  const t=new Date(a.TargetSelesai); const today=new Date(); today.setHours(0,0,0,0); t.setHours(0,0,0,0);
+  return Math.round((today-t)/86400000);
+}
+
+function renderMitigasi(el){
+  if(!STATE.mitigasi.loaded){
+    el.innerHTML=`<div class="placeholder"><div class="pic">🎯</div><h2>Memuat action mitigasi…</h2></div>`;
+    loadMitigasiIfNeeded_();
+    return;
+  }
+  const m=STATE.mitigasi;
+  const overdueList=m.actions.filter(isActionOverdue_);
+  const subtabs=`<div class="dt-subtabs">
+    <button class="dt-subtab ${m.tab==='board'?'on':''}" onclick="STATE.mitigasi.tab='board';renderModule()">📋 Board</button>
+    <button class="dt-subtab ${m.tab==='butuh'?'on':''}" onclick="STATE.mitigasi.tab='butuh';renderModule()">⚡ Butuh Action</button>
+    <button class="dt-subtab ${m.tab==='scorecard'?'on':''}" onclick="STATE.mitigasi.tab='scorecard';renderModule()">🏆 Scorecard Fungsi</button>
+  </div>
+  ${overdueList.length ? `<div class="panel" style="border:1px solid var(--red,#ff5c5c);background:rgba(255,92,92,.08);margin-bottom:14px;cursor:pointer" onclick="STATE.mitigasi.tab='board';renderModule()">
+    <div style="font-weight:700;font-size:13px;color:var(--red,#ff5c5c)">⏰ ${overdueList.length} action lewat target selesai</div>
+    <div style="font-size:11.5px;color:var(--ink2);margin-top:3px">${overdueList.slice(0,3).map(a=>`${a.Judul} (PIC: ${a.PIC}, telat ${daysOverdue_(a)} hari)`).join(' · ')}${overdueList.length>3?' · +'+(overdueList.length-3)+' lainnya':''}</div>
+  </div>` : ''}`;
+  if(m.tab==='butuh'){ el.innerHTML=subtabs+'<div id="mitBody"></div>'; renderMitigasiButuhAction(document.getElementById('mitBody')); return; }
+  if(m.tab==='scorecard'){ el.innerHTML=subtabs+'<div id="mitBody"></div>'; renderMitigasiScorecard(document.getElementById('mitBody')); return; }
+
+  const q=(m.search||'').toLowerCase().trim();
+  let actions=m.actions.filter(a=>{
+    if(m.filterFungsi!=='ALL' && a.Fungsi!==m.filterFungsi) return false;
+    if(STATE.pu!=='ALL' && a.PU && a.PU!==STATE.pu) return false;
+    if(q && !((a.Judul||'').toLowerCase().includes(q) || (a.PIC||'').toLowerCase().includes(q) || (a.Fungsi||'').toLowerCase().includes(q) || (a.Kategori||'').toLowerCase().includes(q))) return false;
+    return true;
+  });
+  const fungsiOpts=(DB.fungsi||[]).filter(Boolean);
+  const cols=[
+    {status:'Belum Mulai', label:'⬜ Belum Mulai', color:'var(--ink3)'},
+    {status:'Sedang Berjalan', label:'🟡 Sedang Berjalan', color:'var(--amber)'},
+    {status:'Selesai', label:'✅ Selesai', color:'var(--teal, #3ad6c4)'},
+  ];
+  const cardHtml=a=>{
+    let ev=[]; try{ ev=JSON.parse(a.EvidenceLinks||'[]'); }catch(e){ ev=[]; }
+    const overdue=isActionOverdue_(a);
+    return `<div class="panel" style="margin-bottom:10px;cursor:pointer${overdue?';border:1px solid var(--red,#ff5c5c)':''}" onclick="openActionDetail('${a.ActionID}')">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:start">
+        <div style="font-weight:700;font-size:13px">${a.Judul||'(tanpa judul)'}</div>
+        ${a.PU?`<span class="tag ${PU_TAG[PU_IDX[a.PU]]}">${a.PU}</span>`:''}
+      </div>
+      <div style="color:var(--ink2);font-size:11.5px;margin-top:4px">${a.Fungsi||'-'}${a.Kategori?' · '+a.Kategori:''}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:11px;color:var(--ink3)">
+        <span>👤 ${a.PIC||'-'}</span>
+        <span>${ev.length?`📎 ${ev.length}`:''} ${a.TargetSelesai?'🎯 '+a.TargetSelesai:''}</span>
+      </div>
+      ${overdue?`<div style="margin-top:6px;font-size:11px;color:var(--red,#ff5c5c);font-weight:700">⏰ Overdue ${daysOverdue_(a)} hari</div>`:''}
+    </div>`;
+  };
+  el.innerHTML=subtabs+`
+    <div class="sec-label">Mitigasi Downtime · Action Tracking per Fungsi</div>
+    <div class="panel" style="margin-bottom:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+      <select onchange="STATE.mitigasi.filterFungsi=this.value;renderModule()" style="background:var(--bg2);border:1px solid var(--line2);border-radius:8px;padding:8px 10px;color:var(--ink);font-size:12.5px">
+        <option value="ALL" ${m.filterFungsi==='ALL'?'selected':''}>Semua Fungsi</option>
+        ${fungsiOpts.map(f=>`<option value="${f}" ${m.filterFungsi===f?'selected':''}>${f}</option>`).join('')}
+      </select>
+      <input type="text" placeholder="Cari judul/PIC/fungsi…" value="${m.search||''}" oninput="STATE.mitigasi.search=this.value;renderModule()"
+        style="flex:1;min-width:160px;background:var(--bg2);border:1px solid var(--line2);border-radius:8px;padding:8px 10px;color:var(--ink);font-size:12.5px">
+      <button class="pchip" onclick="refreshMitigasi()">🔄 Refresh</button>
+      <button class="login-btn" style="width:auto;padding:8px 16px" onclick="openCreateActionModal()">+ Action Baru</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px">
+      ${cols.map(c=>{
+        const items=actions.filter(a=>a.Status===c.status);
+        return `<div>
+          <div style="font-weight:700;font-size:12.5px;color:${c.color};margin-bottom:8px">${c.label} (${items.length})</div>
+          ${items.map(cardHtml).join('') || '<div class="panel" style="text-align:center;color:var(--ink3);padding:20px;font-size:12px">Kosong</div>'}
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+/* Cari 1 Fungsi yang paling representatif buat sebuah nama Kategori (dari data downtime yang ada). */
+function fungsiForKategori_(katName){
+  for(const r of DB.dt){ if((DB.kat[r[3]]||'')===katName) return DB.fungsi[r[4]]||''; }
+  return '';
+}
+
+/* "⚡ Butuh Action" — kategori penyumbang downtime terbesar (sesuai filter periode+PU aktif)
+   yang BELUM punya action item sama sekali. Diurutkan dari dampak terbesar. */
+function renderMitigasiButuhAction(el){
+  const A=aggregate();
+  const existingKat=new Set(STATE.mitigasi.actions.map(a=>(a.Kategori||'').trim().toLowerCase()).filter(Boolean));
+  const katArr=Object.entries(A.byKat).map(([kat,v])=>({kat,net:v.net,raw:v.raw,n:v.n}))
+    .filter(x=>x.kat && x.kat!=='-').sort((a,b)=>b.net-a.net);
+  const totNet=katArr.reduce((s,x)=>s+x.net,0)||1;
+  const needAction=katArr.filter(x=>!existingKat.has(x.kat.trim().toLowerCase()));
+  el.innerHTML=`
+    <div class="sec-label">Kategori Downtime Belum Punya Action · ${periodLabel()}${STATE.pu!=='ALL'?' · '+STATE.pu:''}</div>
+    <div class="panel" style="margin-bottom:10px;font-size:11.5px;color:var(--ink2)">
+      Diurutkan dari kontribusi jam net terbesar yang <b>sama sekali belum ada action item-nya</b> — ini kandidat prioritas buat PE todong ke Fungsi terkait.
+    </div>
+    ${needAction.length ? needAction.map((x,i)=>{
+      const fn=fungsiForKategori_(x.kat);
+      const pct=(x.net/totNet*100).toFixed(1);
+      return `<div class="panel" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <div>
+          <div style="font-weight:700;font-size:13px">#${i+1} ${x.kat}</div>
+          <div style="font-size:11.5px;color:var(--ink2);margin-top:2px">${fn||'Fungsi belum di-mapping'} · ${x.n} event · ${fmt.n(x.net,2)} jam net (${pct}% dari total)</div>
+        </div>
+        <button class="login-btn" style="width:auto;padding:8px 16px" onclick="openCreateActionModal('${x.kat.replace(/'/g,"\\'")}','${fn.replace(/'/g,"\\'")}')">+ Buat Action</button>
+      </div>`;
+    }).join('') : `<div class="panel" style="text-align:center;color:var(--ink3);padding:24px">✅ Semua kategori penyumbang downtime di periode ini sudah punya action item.</div>`}`;
+}
+
+/* "🏆 Scorecard Fungsi" — per Fungsi: total downtime jam & cost Rupiah (sesuai filter periode+PU aktif),
+   plus progress action (berapa closed dari total) & rata² lama penyelesaian. Ini yang paling kena
+   buat dipresentasikan ke manajemen: bukan cuma "siapa penyumbang terbesar" tapi "siapa yang paling
+   responsif nutup action-nya". */
+function renderMitigasiScorecard(el){
+  const A=aggregate();
+  const byFungsi={};
+  for(const r of A.dt){
+    const fn=DB.fungsi[r[4]]||'(belum di-mapping)';
+    if(!byFungsi[fn]) byFungsi[fn]={net:0,raw:0,n:0,costJam:0,costKL:0};
+    const c=costOfRow_(r);
+    byFungsi[fn].net+=netVal(r); byFungsi[fn].raw+=rawVal(r); byFungsi[fn].n++;
+    byFungsi[fn].costJam+=c.byJam; byFungsi[fn].costKL+=c.byKL;
+  }
+  const totNet=Object.values(byFungsi).reduce((s,v)=>s+v.net,0)||1;
+  const hasCost = Object.values(byFungsi).some(v=>v.costJam>0||v.costKL>0);
+
+  // progress action per fungsi (semua action, tidak dibatasi periode dashboard — action sifatnya berjalan)
+  const actByFungsi={};
+  STATE.mitigasi.actions.forEach(a=>{
+    const fn=a.Fungsi||'(belum di-mapping)';
+    if(!actByFungsi[fn]) actByFungsi[fn]={total:0,selesai:0,totalHariSelesai:0,nSelesai:0};
+    actByFungsi[fn].total++;
+    if(a.Status==='Selesai'){
+      actByFungsi[fn].selesai++;
+      if(a.TanggalDibuat && a.TerakhirUpdate){
+        const d=(new Date(a.TerakhirUpdate)-new Date(a.TanggalDibuat))/86400000;
+        if(d>=0){ actByFungsi[fn].totalHariSelesai+=d; actByFungsi[fn].nSelesai++; }
+      }
+    }
+  });
+
+  const rows=Object.entries(byFungsi).map(([fn,v])=>{
+    const act=actByFungsi[fn]||{total:0,selesai:0,totalHariSelesai:0,nSelesai:0};
+    const progress = act.total>0 ? Math.round(act.selesai/act.total*100) : null;
+    const avgHari = act.nSelesai>0 ? (act.totalHariSelesai/act.nSelesai) : null;
+    return {fn, ...v, pct:(v.net/totNet*100), act, progress, avgHari};
+  }).sort((a,b)=>b.net-a.net);
+
+  el.innerHTML=`
+    <div class="sec-label">Scorecard per Fungsi · ${periodLabel()}${STATE.pu!=='ALL'?' · '+STATE.pu:''}</div>
+    <div class="panel" style="margin-bottom:10px;font-size:11.5px;color:var(--ink2)">
+      Kontribusi downtime tiap Fungsi (sesuai filter aktif) dipadukan sama progress action mitigasi-nya — biar kelihatan bukan cuma "siapa penyumbang terbesar" tapi "siapa yang paling gerak nutup action-nya".
+      ${hasCost?'':' <span style="color:var(--ink3)">(Isi Cost Parameter di Master Data biar kolom Rupiah kehitung.)</span>'}
+    </div>
+    <div class="panel" style="overflow-x:auto">
+      <table class="md-table">
+        <thead><tr><th>Fungsi</th><th class="num">Net Jam</th><th class="num">% Kontribusi</th>${hasCost?'<th class="num">Cost (Jam)</th><th class="num">Cost (KL)</th>':''}<th class="num">Action Selesai</th><th class="num">Rata² Hari Selesai</th></tr></thead>
+        <tbody>${rows.map(x=>`<tr>
+          <td><b>${x.fn}</b></td>
+          <td class="num">${fmt.n(x.net,2)}</td>
+          <td class="num">${x.pct.toFixed(1)}%</td>
+          ${hasCost?`<td class="num">${fmt.rp(x.costJam)}</td><td class="num">${fmt.rp(x.costKL)}</td>`:''}
+          <td class="num">${x.progress!=null?`${x.act.selesai}/${x.act.total} (${x.progress}%)`:'<span style="color:var(--ink3)">belum ada action</span>'}</td>
+          <td class="num">${x.avgHari!=null?fmt.n(x.avgHari,1)+' hari':'-'}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>`;
+}
+
+function openCreateActionModal(prefillKat, prefillFungsi){
+  let mo=document.getElementById('actionModal'); if(!mo){ mo=document.createElement('div'); mo.id='actionModal'; mo.className='modal-overlay'; document.body.appendChild(mo); }
+  const fungsiOpts=(DB.fungsi||[]).filter(Boolean);
+  const katOpts=(DB.kat||[]).filter(Boolean);
+  mo.innerHTML=`<div class="modal-box" onclick="event.stopPropagation()" style="max-width:420px">
+    <div class="modal-head"><h3>+ Action Mitigasi Baru</h3><button class="modal-x" onclick="closeActionModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="login-field"><label>PU</label><select id="newActPu" style="width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:8px;padding:9px;color:var(--ink)">
+        <option value="">- Umum / Lintas PU -</option>${PU_NAME.map(p=>`<option value="${p}" ${STATE.pu===p?'selected':''}>${p}</option>`).join('')}</select></div>
+      <div class="login-field"><label>Fungsi</label><select id="newActFungsi" style="width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:8px;padding:9px;color:var(--ink)">
+        <option value="">- pilih -</option>${fungsiOpts.map(f=>`<option value="${f}" ${prefillFungsi===f?'selected':''}>${f}</option>`).join('')}</select></div>
+      <div class="login-field"><label>Kategori terkait (opsional)</label><select id="newActKat" style="width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:8px;padding:9px;color:var(--ink)">
+        <option value="">- umum -</option>${katOpts.map(k=>`<option value="${k}" ${prefillKat===k?'selected':''}>${k}</option>`).join('')}</select></div>
+      <div class="login-field"><label>Judul Tindakan</label><input id="newActJudul" placeholder="mis. Perbaikan sensor filler line FL02" value="${prefillKat?('Mitigasi '+prefillKat).replace(/"/g,'&quot;'):''}"></div>
+      <div class="login-field"><label>Deskripsi</label><textarea id="newActDeskripsi" rows="3" style="width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:8px;padding:9px;color:var(--ink);font-family:inherit"></textarea></div>
+      <div class="login-field"><label>PIC (UID penanggung jawab)</label><input id="newActPic" placeholder="mis. bagus"></div>
+      <div class="login-field"><label>Target Selesai</label><input id="newActTarget" type="date"></div>
+      <div class="login-field"><label>Dukungan Dibutuhkan (opsional)</label><input id="newActSupport" placeholder="mis. approval budget spare part"></div>
+      <button class="login-btn" onclick="submitCreateAction()">Simpan Action</button>
+      <div class="login-error" id="actionModalError"></div>
+    </div>
+  </div>`;
+}
+function closeActionModal(){ const m=document.getElementById('actionModal'); if(m)m.remove(); }
+async function submitCreateAction(){
+  const judul=document.getElementById('newActJudul').value.trim();
+  const pic=document.getElementById('newActPic').value.trim();
+  const errEl=document.getElementById('actionModalError');
+  if(!judul||!pic){ errEl.textContent='Judul dan PIC wajib diisi.'; return; }
+  try{
+    await postSync_({action:'create_action_mitigasi', uid:CONFIG.UID, pw:CONFIG.PW,
+      pu:document.getElementById('newActPu').value, fungsi:document.getElementById('newActFungsi').value,
+      kategori:document.getElementById('newActKat').value, bulan:STATE.mTo, tahun:new Date().getFullYear(),
+      judul, deskripsi:document.getElementById('newActDeskripsi').value, pic,
+      targetSelesai:document.getElementById('newActTarget').value, support:document.getElementById('newActSupport').value});
+    closeActionModal(); notify('success','Action baru dibuat.'); refreshMitigasi();
+  }catch(err){ errEl.textContent=String(err.message||err); }
+}
+
+/* Validasi dampak: bandingkan jam net kategori itu di bulan action dibuat vs bulan terbaru yang ada
+   datanya (PU sama kalau action itu spesifik 1 PU). Dipakai buat action yang statusnya Selesai. */
+function katNetInMonth_(katName, pu, bulan){
+  let net=0;
+  DB.dt.forEach(r=>{
+    if(DB.kat[r[3]]!==katName) return;
+    if(pu && PU_NAME[r[0]]!==pu) return;
+    if(r[1]!==Number(bulan)) return;
+    net+=netVal(r);
+  });
+  return net;
+}
+/* Blok "Validasi Dampak" di modal detail action — cuma muncul kalau action Selesai dan punya Kategori.
+   Bandingkan jam net kategori itu di bulan action dibuat vs bulan terbaru yang ada datanya. */
+function dampakBlockHtml_(a){
+  if(a.Status!=='Selesai' || !a.Kategori || !a.Bulan) return '';
+  const bulanMulai=Number(a.Bulan);
+  const bulanTerbaru=Math.max(...DB.dt.map(r=>r[1]).filter(m=>m>0), bulanMulai);
+  if(bulanTerbaru<=bulanMulai) return '';
+  const netMulai=katNetInMonth_(a.Kategori, a.PU||null, bulanMulai);
+  const netTerbaru=katNetInMonth_(a.Kategori, a.PU||null, bulanTerbaru);
+  const delta=netTerbaru-netMulai;
+  const pct=netMulai>0 ? (delta/netMulai*100) : null;
+  const membaik = delta<0;
+  return `<div class="login-field"><label>📉 Validasi Dampak (otomatis)</label>
+    <div style="font-size:12px;color:var(--ink2)">${a.Kategori} · ${MN[bulanMulai]} (saat action dibuat): <b>${fmt.n(netMulai,2)} jam</b> → ${MN[bulanTerbaru]} (terbaru): <b>${fmt.n(netTerbaru,2)} jam</b></div>
+    <div style="margin-top:4px">
+      ${membaik
+        ? `<span class="chip dn">✅ Turun ${fmt.n(Math.abs(delta),2)} jam${pct!=null?' ('+Math.abs(pct).toFixed(0)+'%)':''} — dampaknya kelihatan</span>`
+        : `<span class="chip up">⚠ ${delta>0?'Naik':'Belum turun'} ${fmt.n(Math.abs(delta),2)} jam${pct!=null?' ('+Math.abs(pct).toFixed(0)+'%)':''} — mungkin perlu action lanjutan</span>`}
+    </div>
+  </div>`;
+}
+function openActionDetail(actionId){
+  const a=STATE.mitigasi.actions.find(x=>x.ActionID===actionId); if(!a) return;
+  let mo=document.getElementById('actionModal'); if(!mo){ mo=document.createElement('div'); mo.id='actionModal'; mo.className='modal-overlay'; document.body.appendChild(mo); }
+  let ev=[]; try{ ev=JSON.parse(a.EvidenceLinks||'[]'); }catch(e){ ev=[]; }
+  const canEdit=!!a.canEdit;
+  const logRows=STATE.mitigasi.log.filter(l=>l.ActionID===actionId).sort((x,y)=>new Date(y.Waktu)-new Date(x.Waktu));
+  mo.innerHTML=`<div class="modal-box" onclick="event.stopPropagation()" style="max-width:460px">
+    <div class="modal-head"><h3>${a.Judul}</h3><button class="modal-x" onclick="closeActionModal()">✕</button></div>
+    <div class="modal-body">
+      <div style="color:var(--ink2);font-size:12px;margin-bottom:8px">${a.Fungsi||'-'}${a.Kategori?' · '+a.Kategori:''} ${a.PU?'· '+a.PU:''} · PIC: <b>${a.PIC}</b></div>
+      ${a.Deskripsi?`<div style="font-size:12.5px;color:var(--ink2);margin-bottom:10px">${a.Deskripsi}</div>`:''}
+      <div class="login-field"><label>Status</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${['Belum Mulai','Sedang Berjalan','Selesai'].map(s=>`<button class="pchip ${a.Status===s?'on':''}" ${canEdit?`onclick="updateActionStatus('${actionId}','${s}')"`:'disabled style="opacity:.5"'}>${s}</button>`).join('')}
+        </div>
+      </div>
+      ${dampakBlockHtml_(a)}
+      <div class="login-field"><label>Dukungan Dibutuhkan</label>
+        <input id="actSupportEdit" value="${(a.Support||'').replace(/"/g,'&quot;')}" ${canEdit?'':'disabled'} style="width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:8px;padding:9px;color:var(--ink)">
+        ${canEdit?`<button class="pchip" style="margin-top:6px" onclick="saveActionSupport('${actionId}')">Simpan Dukungan</button>`:''}
+      </div>
+      <div class="login-field"><label>Evidence (${ev.length})</label>
+        ${ev.map(x=>`<div style="font-size:12px;margin-bottom:4px"><a href="${x.url}" target="_blank" style="color:var(--amber)">📎 ${x.label||'file'}</a> <span style="color:var(--ink3)">— ${x.oleh}, ${new Date(x.waktu).toLocaleDateString('id-ID')}</span></div>`).join('') || '<div style="color:var(--ink3);font-size:12px">Belum ada evidence</div>'}
+        ${canEdit?`
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+          <input id="actEvUrl" placeholder="Tempel link evidence (Drive/WA/email)…" style="background:var(--bg2);border:1px solid var(--line2);border-radius:8px;padding:8px;color:var(--ink);font-size:12px">
+          <button class="pchip" onclick="addEvidenceLink('${actionId}')">+ Tambah Link</button>
+          <input id="actEvFile" type="file" style="font-size:11px">
+          <button class="pchip" onclick="addEvidenceFile('${actionId}')">📤 Upload File</button>
+        </div>`:''}
+      </div>
+      ${logRows.length?`<div class="modal-divider"></div><div class="login-field"><label>Histori</label>
+        ${logRows.map(l=>`<div style="font-size:11px;color:var(--ink3);margin-bottom:3px">${new Date(l.Waktu).toLocaleString('id-ID')} · ${l.Oleh}: ${l.StatusLama} → ${l.StatusBaru}${l.Catatan?' ('+l.Catatan+')':''}</div>`).join('')}
+      </div>`:''}
+      <div class="login-error" id="actionModalError"></div>
+    </div>
+  </div>`;
+}
+async function updateActionStatus(actionId, status){
+  try{
+    await postSync_({action:'update_action_mitigasi', uid:CONFIG.UID, pw:CONFIG.PW, actionId, status});
+    notify('success','Status diperbarui.'); STATE.mitigasi.loaded=false; await loadMitigasiIfNeeded_(); openActionDetail(actionId);
+  }catch(err){ const e=document.getElementById('actionModalError'); if(e) e.textContent=String(err.message||err); }
+}
+async function saveActionSupport(actionId){
+  const val=document.getElementById('actSupportEdit').value;
+  try{
+    await postSync_({action:'update_action_mitigasi', uid:CONFIG.UID, pw:CONFIG.PW, actionId, support:val});
+    notify('success','Dukungan disimpan.'); STATE.mitigasi.loaded=false; await loadMitigasiIfNeeded_(); openActionDetail(actionId);
+  }catch(err){ const e=document.getElementById('actionModalError'); if(e) e.textContent=String(err.message||err); }
+}
+async function addEvidenceLink(actionId){
+  const url=document.getElementById('actEvUrl').value.trim();
+  if(!url) return;
+  try{
+    await postSync_({action:'add_evidence_mitigasi', uid:CONFIG.UID, pw:CONFIG.PW, actionId, url, label:url.slice(0,40)});
+    notify('success','Evidence link ditambahkan.'); STATE.mitigasi.loaded=false; await loadMitigasiIfNeeded_(); openActionDetail(actionId);
+  }catch(err){ const e=document.getElementById('actionModalError'); if(e) e.textContent=String(err.message||err); }
+}
+async function addEvidenceFile(actionId){
+  const inp=document.getElementById('actEvFile');
+  const file=inp.files && inp.files[0];
+  if(!file){ const e=document.getElementById('actionModalError'); if(e) e.textContent='Pilih file dulu.'; return; }
+  if(file.size > 8*1024*1024){ const e=document.getElementById('actionModalError'); if(e) e.textContent='File maksimal 8MB.'; return; }
+  const reader=new FileReader();
+  reader.onload=async()=>{
+    const base64Data=reader.result.split(',')[1];
+    try{
+      await postSync_({action:'add_evidence_mitigasi', uid:CONFIG.UID, pw:CONFIG.PW, actionId,
+        base64Data, fileName:file.name, mimeType:file.type, label:file.name});
+      notify('success','Evidence berhasil diupload.'); STATE.mitigasi.loaded=false; await loadMitigasiIfNeeded_(); openActionDetail(actionId);
+    }catch(err){ const e=document.getElementById('actionModalError'); if(e) e.textContent=String(err.message||err); }
+  };
+  reader.readAsDataURL(file);
 }
 
 function doLogout(){
