@@ -968,7 +968,7 @@ const DB = JSON.parse(document.getElementById('seed').textContent);
 const OEE = (function(){ const el=document.getElementById('oeeseed'); return el?JSON.parse(el.textContent):null; })();
 
 const CONFIG = {
-  SYNC_URL: 'https://script.google.com/macros/s/AKfycbyrdOl51Em1SL95MVOvSAq-J_1AsCnXpko03HkIdAsRudin_YcIWsfqMaNPrHoHeTJk/exec',
+  SYNC_URL: 'https://script.google.com/macros/s/AKfycbxcHdeIQrKe58cvw7s0JRImi20_Wxtnir2jjtlFX2IZs5443A9OVpvEbhlKlBGcjm4c/exec',
   UID: sessionStorage.getItem('ophub_uid') || '',
   PW: sessionStorage.getItem('ophub_pw') || '',
   USE_LIVE: true
@@ -1415,7 +1415,7 @@ function renderDetailEvent(el){
       batch: r[20]||'', kimap:r[21]||'', solusi:r[22]||'', awal:r[23]||'', akhir:r[24]||'',
       kategori:DB.kat[r[3]]||'', fungsi:DB.fungsi[r[4]]||'', sebab:DB.sebabList[r[16]]||'',
       detail:r[8]||'', tgl:tglStr, tglSort:(mm||0)*100+(dd||0),
-      raw:rawVal(r), net:netVal(r)
+      raw:rawVal(r), net:netVal(r), tolBadge:tolBadge(r)
     };
   });
   const q=(STATE.detailSearch||'').toLowerCase().trim();
@@ -1442,15 +1442,15 @@ function renderDetailEvent(el){
         oninput="setDetailSearch(this.value)" style="width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:8px;padding:9px 12px;color:var(--ink);font-size:13px">
     </div>
     <div class="panel" style="overflow-x:auto">
-      <table class="md-table" style="table-layout:fixed;min-width:1400px">
+      <table class="md-table" style="table-layout:fixed;min-width:1480px">
         <colgroup>
           <col style="width:72px"><col style="width:52px"><col style="width:90px"><col style="width:90px">
           <col style="width:160px"><col style="width:100px"><col style="width:150px"><col style="width:64px">
-          <col style="width:100px"><col style="width:260px"><col style="width:220px"><col style="width:80px"><col style="width:80px">
+          <col style="width:100px"><col style="width:240px"><col style="width:200px"><col style="width:80px"><col style="width:80px"><col style="width:110px">
         </colgroup>
         <thead><tr>
           ${th('Tanggal','tgl')}${th('PU','pu')}${th('Line/Mesin','line')}${th('Kimap','kimap')}${th('Produk','produk')}${th('Batch','batch')}
-          ${th('Kategori','kategori')}${th('Sebab','sebab')}<th>Jam</th><th>Detail</th><th>Solusi</th>${th('Raw (jam)','durasiRaw')}${th('Net (jam)','durasi')}
+          ${th('Kategori','kategori')}${th('Sebab','sebab')}<th>Jam</th><th>Detail</th><th>Solusi</th>${th('Raw (jam)','durasiRaw')}${th('Net (jam)','durasi')}<th>Toleransi</th>
         </tr></thead>
         <tbody>
           ${shown.map(x=>`<tr>
@@ -1467,7 +1467,8 @@ function renderDetailEvent(el){
             <td class="dt-ellipsis" style="color:var(--ink3)" title="${(x.solusi||'').replace(/"/g,'&quot;')}">${x.solusi||'<i style=opacity:.4>-</i>'}</td>
             <td class="num" style="color:var(--ink3)">${fmt.n(x.raw,2)}</td>
             <td class="num" style="color:${x.net>2?'var(--amber)':'var(--ink2)'}">${fmt.n(x.net,2)}</td>
-          </tr>`).join('') || '<tr><td colspan=13 style="text-align:center;padding:24px;color:var(--ink3)">Tidak ada event yang cocok</td></tr>'}
+            <td style="white-space:nowrap">${x.tolBadge||'<span style="color:var(--ink3);font-size:11px">tanpa potongan</span>'}</td>
+          </tr>`).join('') || '<tr><td colspan=14 style="text-align:center;padding:24px;color:var(--ink3)">Tidak ada event yang cocok</td></tr>'}
         </tbody>
       </table>
       ${filtered.length>STATE.detailLimit ? `<div style="text-align:center;padding:12px">
