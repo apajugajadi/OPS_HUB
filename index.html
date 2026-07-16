@@ -967,7 +967,7 @@ const DB = JSON.parse(document.getElementById('seed').textContent);
 const OEE = (function(){ const el=document.getElementById('oeeseed'); return el?JSON.parse(el.textContent):null; })();
 
 const CONFIG = {
-  SYNC_URL: 'https://script.google.com/macros/s/AKfycbwAl95MwJ9T9Xl-MIZsNgVzMXKa-iWQWm92Es2CFHH7jmg8zhsL4oYCZ0ug4TSQdcmk/exec',
+  SYNC_URL: 'https://script.google.com/macros/s/AKfycbxcHdeIQrKe58cvw7s0JRImi20_Wxtnir2jjtlFX2IZs5443A9OVpvEbhlKlBGcjm4c/exec',
   UID: sessionStorage.getItem('ophub_uid') || '',
   PW: sessionStorage.getItem('ophub_pw') || '',
   USE_LIVE: true
@@ -2626,7 +2626,7 @@ function setMasterTab(t){ STATE.masterTab=t; renderModule(); }
 
 function renderMasterData(el){
   const tabs=[['pic','PIC & Penanggung Jawab'],['klasifikasi','Klasifikasi Downtime'],['mapping','Mapping Kategori→Fungsi'],['mesin','Mesin & Tipe'],['kapasitas','Kapasitas Mesin'],['target','Target'],['toleransi','Toleransi'],['cost','💰 Cost Parameter']];
-  if(CURRENT_USER.role==='admin') tabs.push(['admin','⚙ Kelola User & Log']);
+  if(CURRENT_USER.role==='admin') tabs.push(['rawsync','🔄 Sync Raw Bulanan'],['admin','⚙ Kelola User & Log']);
   el.innerHTML=`
     <div class="md-warn">⚠ Perubahan di sini aktif selama sesi ini. Penyimpanan permanen aktif setelah koneksi Google Sheets.</div>
     <div class="md-tabs">${tabs.map(([k,l])=>`<button class="md-tab ${STATE.masterTab===k?'on':''}" onclick="setMasterTab('${k}')">${l}</button>`).join('')}</div>
@@ -2639,9 +2639,39 @@ function renderMasterData(el){
   else if(STATE.masterTab==='kapasitas') c.innerHTML=renderKapasitasMaster();
   else if(STATE.masterTab==='target') c.innerHTML=renderTargetMaster();
   else if(STATE.masterTab==='cost') c.innerHTML=renderCostMaster();
+  else if(STATE.masterTab==='rawsync' && CURRENT_USER.role==='admin') c.innerHTML=renderRawSyncPanel();
   else if(STATE.masterTab==='admin' && CURRENT_USER.role==='admin'){ c.innerHTML='<div class="admin-loading">Memuat…</div>'; renderAdminPanel(c); }
   else c.innerHTML=renderToleransiMaster();
 }
+/* Panel admin: tombol sync 4 sheet raw bulanan -> SIAP_* tanpa perlu buka Google Sheets/Apps Script. */
+function renderRawSyncPanel(){
+  return `<div class="panel">
+    <div class="panel-h"><h3>🔄 Sync Raw Bulanan → Dashboard</h3><span class="hint">khusus admin</span></div>
+    <p class="md-desc">Tarik data dari 4 sheet <code>RAW_BULANAN_HASILPROD / RAW_BULANAN_DOWNTIME / RAW_BULANAN_PEMAKAIAN / RAW_BULANAN_NETOP</code> (yang diisi manual di Google Sheets), convert, lalu replace data bulan terkait di <code>SIAP_HASILPROD/SIAP_DOWNTIME/SIAP_NETOP/SIAP_PEMAKAIAN</code> — sheet yang beneran dipakai dashboard. Aman diklik berkali-kali (replace per PU+Bulan, bukan numpuk).</p>
+    <button class="login-btn" style="width:auto;padding:10px 20px" id="btnSyncRaw" onclick="runSyncRawBulanan()">🔄 Jalankan Sync Sekarang</button>
+    <div id="syncRawResult" style="margin-top:14px;font-size:12.5px"></div>
+  </div>`;
+}
+async function runSyncRawBulanan(){
+  const btn=document.getElementById('btnSyncRaw'); const out=document.getElementById('syncRawResult');
+  btn.disabled=true; btn.textContent='⏳ Sedang sync…'; out.innerHTML='';
+  try{
+    const res=await postSync_({action:'sync_raw_bulanan', uid:CONFIG.UID, pw:CONFIG.PW});
+    if(res.ok){
+      notify('success', `Sync selesai untuk ${res.n} kombinasi PU/Bulan.`);
+      out.innerHTML=`<div style="color:var(--teal,#3ad6c4);font-weight:700;margin-bottom:6px">✓ Sync selesai untuk ${res.n} kombinasi PU/Bulan:</div>` +
+        (res.ringkasan||[]).map(x=>`<div style="color:var(--ink2);margin-bottom:2px">${x}</div>`).join('');
+      // data SIAP_* berubah -> refresh payload dashboard
+      STATE.mitigasi.loaded=false;
+    }else{
+      out.innerHTML=`<div style="color:var(--red,#ff5c5c)">⚠ ${res.error||'Sync gagal.'}</div>`;
+    }
+  }catch(err){
+    out.innerHTML=`<div style="color:var(--red,#ff5c5c)">⚠ ${String(err.message||err)}</div>`;
+  }
+  btn.disabled=false; btn.textContent='🔄 Jalankan Sync Sekarang';
+}
+
 function renderPicTable(){
   const fungsiList=Object.keys(DB.fungsi_meta);
   let rows='';
